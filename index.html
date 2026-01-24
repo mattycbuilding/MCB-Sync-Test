@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>MCB Site Manager – Fieldwire UI</title>
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <meta name="theme-color" content="#0f1115" />
+  <link rel="icon" href="./icon-192.png" />
+  <link rel="stylesheet" href="./styles.css?v=20260123092208">
+</head>
+<body>
+  <header>
+    <div class="hwrap">
+      <div class="brand" role="button" tabindex="0" id="homeBtn">
+        <img src="./logo.png" alt="Matty Campbell Building logo" />
+        <div class="title" id="headerTitle">MCB Site Manager</div>
+      </div>
+      <div class="topactions noPrint">
+        <button class="pill" id="syncBtn" title="Data is stored on this device">Offline</button>
+        <button class="btn small" id="themeBtn" title="Toggle theme">Theme</button>
+        <div class="dropdownWrap" id="navDropdownWrap">
+          <button class="btn small" id="navBtn" type="button" aria-haspopup="true" aria-expanded="false" title="Menu">Menu</button>
+          <div class="dropdownPanel" id="navDropdown" aria-hidden="true">
+            <div class="dropdownList" id="navDropdownList">
+              <button class="dropdownItem" type="button" data-nav="pipeline">Pipeline</button>
+              <button class="dropdownItem" type="button" data-nav="projects">Projects</button>
+              <button class="dropdownItem" type="button" data-nav="tasks">Tasks</button>
+              <button class="dropdownItem" type="button" data-nav="diary">Diary</button>
+              <button class="dropdownItem" type="button" data-nav="reports">Reports</button>
+              <button class="dropdownItem" type="button" data-nav="hs">H&amp;S</button>
+              <button class="dropdownItem" type="button" data-nav="equipment">Equipment</button>
+              <button class="dropdownItem" type="button" data-nav="fleet">Fleet</button>
+              <button class="dropdownItem" type="button" data-nav="settings">Settings</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+</div>
+</div>
+<main id="app"></main>
+
+
+  <div class="modalback" id="modalBack">
+    <div class="modal" id="modal"></div>
+  </div>
+
+  <input type="file" id="importFile" accept="application/json" style="display:none" />
+
+  <script>
+(function(){
+  const box = document.createElement('div');
+  box.id = 'fatalErrorBox';
+  box.style.cssText = 'position:fixed;inset:auto 12px 12px 12px;z-index:99999;background:#111;color:#fff;border:1px solid #444;border-radius:12px;padding:10px 12px;font:12px/1.3 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial;display:none;white-space:pre-wrap;';
+  document.addEventListener('DOMContentLoaded',()=>document.body.appendChild(box));
+  function show(msg){
+    box.textContent = 'APP ERROR:\n' + msg + '\n\nTip: add ?nosw=1 to URL, then hard refresh.';
+    box.style.display = 'block';
+  }
+  window.addEventListener('error', (e)=>{ show(e.message + (e.filename?('\n'+e.filename+':'+e.lineno):'')); });
+  window.addEventListener('unhandledrejection', (e)=>{ show(String(e.reason||e)); });
+})();
+</script>
+
+  <script src="./app.js?v=20260123092208"></script>
+
+
+
+<!-- Phase 1 Photos Taken UI -->
+<script>
+document.addEventListener("click",()=>{
+  document.querySelectorAll(".photos-field").forEach(f=>{
+    if(!f.querySelector(".photosTaken")){
+      f.innerHTML = '<label><input type="checkbox" class="photosTaken"/> Photos taken</label>';
+    }
+  });
+});
+</script>
+
+
+<script>
+(function(){
+  const box = document.createElement('div');
+  box.id = 'fatalErrorBox';
+  box.style.cssText = 'position:fixed;inset:auto 12px 12px 12px;z-index:99999;background:#111;color:#fff;border:1px solid #444;border-radius:12px;padding:10px 12px;font:12px/1.3 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial;display:none;white-space:pre-wrap;';
+  document.addEventListener('DOMContentLoaded',()=>document.body.appendChild(box));
+  function show(msg){
+    box.textContent = 'APP ERROR:\n' + msg + '\n\nTip: add ?nosw=1 to URL, then hard refresh.';
+    box.style.display = 'block';
+  }
+  window.addEventListener('error', (e)=>{ show(e.message + (e.filename?('\n'+e.filename+':'+e.lineno):'')); });
+  window.addEventListener('unhandledrejection', (e)=>{ show(String(e.reason||e)); });
+})();
+</script>
+
+</body>
+
+
+
+</html>
