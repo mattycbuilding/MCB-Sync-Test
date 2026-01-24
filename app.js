@@ -2963,6 +2963,3307 @@ $("#importFile").addEventListener("change", async (e)=>{
 
     if(nextState) state = { ...defaults(), ...nextState };
     if(nextSettings) settings = { ...defaultSettings(), ...nextSettings };
+
+    await saveState(state);
+    await saveSettings(settings);
+    applyTheme();
+    render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+    alert("Imported successfully.");
+  }catch(err){
+    console.error(err);
+    alert("Import failed. Check the file.");
+  }finally{
+    e.target.value = "";
+  }
+});
+
+// ----------------- Projects -----------------
+
+
+function renderFleetPage(app){
+  setHeader("Fleet");
+  app.innerHTML = renderFleet();
+  try{ bindFleetEvents(); }catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+}
+
+function renderEquipmentPage(app){
+  setHeader("Equipment");
+  // Render company-wide equipment register
+  app.innerHTML = renderEquipment();
+  // renderEquipment writes a full page; we still need to bind events
+  try{ bindEquipmentEvents(); }catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+}
+
+function renderProjects(app){
+  setHeader("Projects");
+  const list = aliveArr(state.projects)
+    .slice()
+    .sort((a,b)=> (b.updatedAt||"").localeCompare(a.updatedAt||""));
+  app.innerHTML = `
+    <div class="grid two">
+      ${upcomingCardHTML(7)}
+      <div class="card">
+        <div class="row space">
+          <h2>Projects</h2>
+          <button class="btn primary" id="newProject" type="button">New Project</button>
+        </div>
+        <div class="sub">Tap a project to manage: diary, tasks, variations, subbies, deliveries, inspections, reports.</div>
+        <hr/>
+        <div class="list" id="projectList">
+          ${list.length ? list.map(p=>projectCard(p)).join("") : `<div class="sub">No projects yet. Create your first one.</div>`}
+        </div>
+      </div>
+      <div class="card">
+        <h2>Quick tips</h2>
+        <div class="sub">
+          • “Drive” opens Waze with the project destination.<br/>
+          • “Live Map” shows the site location based on the saved address (and coordinates if geocoded).<br/>
+          • Projects can be edited/deleted from inside a project (Admin only). Data is stored locally on this device.<br/>
+        </div>
+        <hr/>
+        <button class="btn" id="demoBtn" type="button">Load demo data</button>
+        <div class="smallmuted">Demo is optional — you can delete it later.</div>
+      </div>
+    </div>
+  `;
+
+  // Export/Import buttons live on this page
+  try{ bindImportExportButtons(); }catch(e){}
+
+  const renderProjectsList = (arr)=>{
+    const el = $("#projectList");
+    if(!el) return;
+    el.innerHTML = arr.length ? arr.map(p=>projectCard(p)).join("") : `<div class="sub">No projects match your filter.</div>`;
+  };
+  const applyProjectFilters = ()=>{
+    const q = ($("#projSearch")?.value || "").toLowerCase().trim();
+    const stg = $("#projStageFilter")?.value || "";
+    const all = aliveArr(state.projects).slice().sort((a,b)=> (b.updatedAt||"").localeCompare(a.updatedAt||""));
+    const filtered = all.filter(p=>{
+      const s = (p.stage || "Active Build");
+      const hitsStage = !stg || s===stg;
+      const hitsQ = !q || ((p.name||"").toLowerCase().includes(q) || (p.address||"").toLowerCase().includes(q) || (p.clientName||"").toLowerCase().includes(q));
+      return hitsStage && hitsQ;
+    });
+    renderProjectsList(filtered);
+  };
+  if($("#projStageFilter")) $("#projStageFilter").onchange = applyProjectFilters;
+  if($("#projSearch")) $("#projSearch").oninput = applyProjectFilters;
+
+    const _np = $("#newProject");
+  if(_np){
+    if(!canEdit("projects")){ _np.style.display = "none"; }
+    else _np.onclick = ()=> openProjectForm();
+  }
+  $("#demoBtn").onclick = ()=> loadDemo();
+  $$("#projectList .item").forEach(el=>{
+    el.addEventListener("click", (e)=>{
+      if(e.target.closest("[data-action]")) return;
+      const id = el.dataset.id;
+      navTo("project", { id });
+    });
+  });
+  $$("#projectList [data-action='drive']").forEach(btn=>btn.addEventListener("click",(e)=>{
+    e.stopPropagation();
+    const id = btn.dataset.id;
+    openWazeForProject(projectById(id));
+  }));
+  $$("#projectList [data-action='edit']").forEach(btn=>btn.addEventListener("click",(e)=>{
+    e.stopPropagation();
+    openProjectForm(projectById(btn.dataset.id));
+  }));
+  $$("#projectList [data-action='delete']").forEach(btn=>btn.addEventListener("click",(e)=>{
+    e.stopPropagation();
+    const id = btn.dataset.id;
+    const p = projectById(id);
+    if(!p) return;
+    if(confirmDelete(`project "${p.name}"`)){
+      // also remove linked items
+      state.projects = softDeleteById(state.projects, id);
+// NOTE: soft delete handled elsewhere
+
+      state.tasks = softDeleteWhere(state.tasks, x => x.projectId === id);
+// NOTE: soft delete handled elsewhere
+
+      state.diary = softDeleteWhere(state.diary, x => x.projectId === id);
+// NOTE: soft delete handled elsewhere
+
+      state.variations = softDeleteWhere(state.variations, x => x.projectId === id);
+// NOTE: soft delete handled elsewhere
+
+      state.deliveries = softDeleteWhere(state.deliveries, x => x.projectId === id);
+// NOTE: soft delete handled elsewhere
+
+      state.inspections = softDeleteWhere(state.inspections, x => x.projectId === id);
+// NOTE: soft delete handled elsewhere
+
+      // keep subbies global
+      saveState(state);
+      render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+    }
+  }));
+  // Upcoming card navigation
+  $$("#app [data-upnav]").forEach(el=>{
+    el.addEventListener("click", ()=>{
+      try{
+        const nav = JSON.parse(decodeURIComponent(el.dataset.upnav));
+        if(nav?.route) navTo(nav.route, nav.params || {});
+      }catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+    });
+  });
+  $("#upcomingRefresh") && ($("#upcomingRefresh").onclick = ()=> render());
+
+}
+
+function projectCard(p){
+  const addr = p.address ? escapeHtml(p.address) : "No address";
+  const coords = (p.lat && p.lng) ? `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}` : "—";
+  return `
+    <div class="item" data-id="${p.id}">
+      <div class="row space">
+        <div>
+          <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+            <div class="title">${escapeHtml(p.name || "Untitled project")}</div>
+            <span class="badge">${escapeHtml(p.stage || "Active Build")}</span>
+          </div>
+          <div class="meta">${addr}</div>
+          <div class="meta">Coords: ${coords}</div>
+        </div>
+        <div class="row">
+          <button class="btn small" data-action="drive" data-id="${p.id}" type="button">Drive</button></div>
+      </div>
+    </div>
+  `;
+}
+
+function openProjectForm(p=null){
+  if(workerModeEnabled() && !canEdit("projects")){
+    alert("This worker profile can't edit projects.");
+    return;
+  }
+
+  const isEdit = !!p;
+  const data = p || { id: uid(), name:"", address:"", clientName:"", clientPhone:"", notes:"", lat:null, lng:null, stage:"Active Build" };
+  showModal(`
+    <div class="row space">
+      <h2>${isEdit ? "Edit Project" : "New Project"}</h2>
+      <button class="btn" id="closeM" type="button">Close</button>
+    </div>
+    <label>Project name</label>
+    <input class="input" id="p_name" value="${escapeHtml(data.name)}" placeholder="e.g., 14 Kowhai Road Renovation" />
+    <label>Address</label>
+    <input class="input" id="p_address" value="${escapeHtml(data.address)}" placeholder="Street, suburb, city (NZ)" />
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="geoBtn" type="button">Geocode address</button>
+      <span class="smallmuted" id="geoStatus">${(data.lat && data.lng) ? `Saved coords: ${data.lat.toFixed(5)}, ${data.lng.toFixed(5)}` : "Optional (improves map + Waze accuracy)"}</span>
+    </div>
+    <div class="grid two">
+      <div>
+        <label>Client name</label>
+        <input class="input" id="p_clientName" value="${escapeHtml(data.clientName||"")}" placeholder="Optional" />
+      </div>
+      <div>
+        <label>Client phone</label>
+        <input class="input" id="p_clientPhone" value="${escapeHtml(data.clientPhone||"")}" placeholder="Optional" />
+      </div>
+    </div>
+    <label>Notes</label>
+    <textarea class="input" id="p_notes" placeholder="Access, hazards, gate code, etc.">${escapeHtml(data.notes||"")}</textarea>
+    <hr/>
+    <div class="row space actionsSticky">
+      <button class="btn ${isEdit ? "primary" : "primary"}" id="saveP" type="button">${isEdit ? "Save changes" : "Create project"}</button>
+      ${isEdit ? `<button class="btn danger" id="delP" type="button">Delete</button>` : `<button class="btn" id="cancelP" type="button">Cancel</button>`}
+    </div>
+  `);
+  $("#closeM").onclick = closeModal;
+  $("#cancelP") && ($("#cancelP").onclick = closeModal);
+
+  $("#geoBtn").onclick = async ()=>{
+    const addr = $("#p_address").value.trim();
+    if(!addr) alert("Enter an address first.");
+    $("#geoStatus").textContent = "Geocoding…";
+    try{
+      const g = await geocodeAddress(addr);
+      data.lat = g.lat; data.lng = g.lng;
+      $("#geoStatus").textContent = `Saved coords: ${g.lat.toFixed(5)}, ${g.lng.toFixed(5)}`;
+    }catch(e){
+      $("#geoStatus").textContent = "Geocode failed (try again later or just save address).";
+    }
+  };
+
+  $("#saveP").onclick = ()=>{
+    data.name = $("#p_name").value.trim();
+    data.address = $("#p_address").value.trim();
+    data.clientName = $("#p_clientName").value.trim();
+    data.clientPhone = $("#p_clientPhone").value.trim();
+    data.notes = $("#p_notes").value.trim();
+    data.updatedAt = new Date().toISOString();
+    if(!data.name) alert("Project name required.");
+    if(isEdit){
+      state.projects = alive(state.projects).filter(isAlive).map(x=>x.id===data.id ? data : x);
+    }else{
+      data.createdAt = new Date().toISOString();
+      state.projects.unshift(data);
+    }
+    saveState(state);
+    closeModal();
+    render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+  };
+
+  $("#delP") && ($("#delP").onclick = ()=>{
+    if(confirmDelete(`project "${data.name}"`)){
+      state.projects = softDeleteById(state.projects, data.id);
+// NOTE: soft delete handled elsewhere
+
+      state.tasks = softDeleteWhere(state.tasks, x => x.projectId === data.id);
+// NOTE: soft delete handled elsewhere
+
+      state.diary = softDeleteWhere(state.diary, x => x.projectId === data.id);
+// NOTE: soft delete handled elsewhere
+
+      state.variations = softDeleteWhere(state.variations, x => x.projectId === data.id);
+// NOTE: soft delete handled elsewhere
+
+      state.deliveries = softDeleteWhere(state.deliveries, x => x.projectId === data.id);
+// NOTE: soft delete handled elsewhere
+
+      state.inspections = softDeleteWhere(state.inspections, x => x.projectId === data.id);
+// NOTE: soft delete handled elsewhere
+
+      saveState(state);
+      closeModal();
+      render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+    }
+  });
+}
+
+function openWazeForProject(p){
+  if(!p) return;
+  const hasCoords = p.lat && p.lng;
+  const url = hasCoords
+    ? `https://waze.com/ul?ll=${encodeURIComponent(p.lat + "," + p.lng)}&navigate=yes`
+    : `https://waze.com/ul?q=${encodeURIComponent(p.address || p.name)}&navigate=yes`;
+  window.open(url, "_blank");
+}
+
+// ----------------- Project Detail (tabs) -----------------
+function renderProjectDetail(app, params){
+  const p = projectById(params.id);
+  if(!p){ navTo("projects"); return; }
+  setHeader(p.name || "Project");
+
+let tab = params.tab || "overview";
+let tabs = PROJECT_TABS.slice();
+
+// Apply per-worker project tab restrictions (Worker mode only)
+const w = workerModeEnabled() ? currentWorker() : null;
+if(w && !w.isAdmin){
+  const pt = (w.perms && w.perms.projectTabs) ? w.perms.projectTabs : null;
+  if(pt){
+    tabs = tabs.filter(([k])=> pt[k] !== false);
+  }
+}
+
+// If the selected tab is not allowed, redirect to the first allowed tab.
+const allowedKeys = new Set(tabs.map(([k])=>k));
+if(!allowedKeys.has(tab)){
+  if(tabs.length){
+    navTo("project", { id:p.id, tab: tabs[0][0] });
+    return;
+  }else{
+    app.innerHTML = `<div class="card"><h2>Access restricted</h2><div class="sub">This profile has no project tabs enabled.</div></div>`;
+    return;
+  }
+}
+  app.innerHTML = `
+    <div class="card">
+      <div class="row space">
+        <div>
+          <h2>${escapeHtml(p.name)}</h2>
+          <div class="sub">${escapeHtml(p.address || "")}</div>
+        </div>
+        <div class="row noPrint">
+          <button class="btn" id="driveBtn" type="button">Drive (Waze)</button>
+          <button class="btn" id="editProjBtn" type="button">Edit</button>
+        </div>
+      </div>
+      <div class="tabs noPrint">
+        ${tabs.map(([k,label])=>`<button class="btn small tab ${k===tab?"primary":""}" data-tab="${k}" type="button">${label}</button>`).join("")}
+      </div>
+    </div>
+
+    <div id="tabContent" style="margin-top:12px"></div>
+  `;
+  $("#driveBtn").onclick = ()=> openWazeForProject(p);
+  $("#editProjBtn").onclick = ()=> openProjectForm(p);
+  $$(".tab").forEach(b=>b.onclick = ()=> navTo("project", { id:p.id, tab:b.dataset.tab }));
+
+  const wrap = $("#tabContent");
+  if(tab==="overview") wrap.innerHTML = projectOverview(p);
+  if(tab==="map") wrap.innerHTML = projectMap(p);
+  if(tab==="tasks") wrap.innerHTML = projectTasks(p);
+  if(tab==="diary") wrap.innerHTML = projectDiary(p);
+  if(tab==="programme") wrap.innerHTML = projectProgramme(p);
+  if(tab==="variations") wrap.innerHTML = projectVariations(p);
+  if(tab==="subbies") wrap.innerHTML = projectSubbies(p);
+  if(tab==="deliveries") wrap.innerHTML = projectDeliveries(p);
+  if(tab==="inspections") wrap.innerHTML = projectInspections(p);
+  if(tab==="reports") wrap.innerHTML = projectReports(p);
+
+  bindProjectTabEvents(p, tab);
+}
+
+
+function projectEquipmentCard(p){
+  const assigned = aliveArr(state.equipment).filter(e=>!e.deletedAt && String(e.projectId)===String(p.id))
+    .sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  return `
+    <div class="card">
+      <div class="row space" style="align-items:center">
+        <h2>Equipment</h2>
+        <button class="btn" type="button" data-assign-equipment="${escapeAttr(p.id)}">Assign</button>
+      </div>
+      <div class="sub">Company equipment assigned to this site.</div>
+      <hr/>
+      ${assigned.length ? assigned.map(e=>`
+        <div class="row space" style="gap:10px; margin:10px 0">
+          <div>
+            <div style="font-weight:800">${escapeHtml(e.name||"Equipment")}</div>
+            <div class="sub">${escapeHtml(e.type||"")}${e.assetTag?` • ${escapeHtml(e.assetTag)}`:""}</div>
+          </div>
+          <div class="row" style="gap:8px">
+            <button class="btn ghost sm" type="button" data-unassign-equipment="${escapeAttr(e.id)}">Remove</button>
+            <button class="btn ghost sm" type="button" data-eq-view="${escapeAttr(e.id)}">Open</button>
+          </div>
+        </div>
+      `).join("") : `<div class="sub">No equipment assigned yet.</div>`}
+    </div>
+  `;
+}
+function assignEquipmentModal(projectId){
+  const p = projectById(projectId);
+  const all = aliveArr(state.equipment).filter(e=>!e.deletedAt && (e.status||"active")!=="retired")
+    .sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  return `
+    <div class="modal">
+      <div class="modalCard">
+        <div class="row space" style="align-items:center">
+          <div>
+            <div class="h2">Assign equipment</div>
+            <div class="sub">Choose equipment to assign to <b>${escapeHtml(p?.name||"site")}</b>.</div>
+          </div>
+          <button class="iconBtn" id="closeModalBtn" type="button">✕</button>
+        </div>
+        <div class="list" style="margin-top:14px; max-height:55vh; overflow:auto">
+          ${all.map(e=>{
+            const assigned = String(e.projectId||"")===String(projectId);
+            return `
+            <div class="listItem">
+              <div class="row space" style="gap:12px">
+                <div>
+                  <div style="font-weight:800">${escapeHtml(e.name||"Equipment")}</div>
+                  <div class="sub">${escapeHtml(e.type||"")}${e.assetTag?` • ${escapeHtml(e.assetTag)}`:""}</div>
+                </div>
+                <button class="btn ${assigned?"ghost":"primary"} sm" type="button" data-assign-eq-item="${escapeAttr(e.id)}" data-project="${escapeAttr(projectId)}">${assigned?"Assigned":"Assign"}</button>
+              </div>
+            </div>`;
+          }).join("")}
+        </div>
+        <div class="row" style="justify-content:flex-end; gap:10px; margin-top:16px">
+          <button class="btn ghost" id="cancelModalBtn" type="button">Close</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+
+function bindAssignEquipmentModal(projectId){
+  // Bind assign/unassign inside the modal
+  const host = document.getElementById("modal");
+  if(!host) return;
+
+  // Toggle assign for each item
+  host.querySelectorAll("[data-assign-eq-item]").forEach(btn=>{
+    btn.onclick = ()=>{
+      const eqId = btn.getAttribute("data-assign-eq-item");
+      const pid = btn.getAttribute("data-project") || projectId;
+      const e = equipmentById(eqId);
+      if(!e) return;
+
+      // In worker mode with location-only restriction, assignment is still a "location" change (allowed).
+      const next = { ...e };
+      const already = String(next.projectId||"") === String(pid);
+      next.projectId = already ? "" : String(pid);
+      // keep locationText as-is; users can adjust location note separately
+      upsertEquipment(next);
+
+      // Refresh modal + overview UI
+      openModal(assignEquipmentModal(pid));
+      bindAssignEquipmentModal(pid);
+
+      try{
+        const r = parseRoute();
+        if(r.path === "project" && String(r.params?.id||"") === String(pid) && String(r.params?.tab||"overview")==="overview"){
+          render();
+        }
+      }catch(e){}
+    };
+  });
+}
+
+
+function projectOverview(p){
+  const openTasks = alive(state.tasks).filter(t=>t.projectId===p.id && t.status!=="Done" && isAlive(t)).length;
+  const diaryCount = alive(state.diary).filter(d=>d.projectId===p.id && isAlive(d)).length;
+  const varOpen = alive(state.variations).filter(v=>v.projectId===p.id && v.status!=="Approved" && isAlive(v)).length;
+  const inspNext = aliveArr(state.inspections)
+    .filter(i=>i.projectId===p.id && isAlive(i))
+    .sort((a,b)=>(a.date||"").localeCompare(b.date||""))
+    .find(i=> new Date(i.date) >= new Date(new Date().toISOString().slice(0,10)));
+  return `
+    <div class="grid two">
+      <div class="card">
+        <h2>Status</h2>
+        <div class="kv"><div class="k">Open tasks</div><div class="v">${openTasks}</div></div>
+        <div class="kv"><div class="k">Diary entries</div><div class="v">${diaryCount}</div></div>
+        <div class="kv"><div class="k">Open variations</div><div class="v">${varOpen}</div></div>
+        <div class="kv"><div class="k">Next inspection</div><div class="v">${inspNext ? `${escapeHtml(inspNext.type)} — ${dateFmt(inspNext.date)}` : "—"}</div></div>
+        <hr/>
+        <button class="btn primary" id="quickTask" type="button">New task</button>
+        <button class="btn" id="quickDiary" type="button">New diary entry</button>
+        <button class="btn" id="quickVar" type="button">New variation</button>
+      </div>
+
+      <div class="card">
+        <h2>Contacts</h2>
+        <div class="kv"><div class="k">Client</div><div class="v">${escapeHtml(p.clientName||"—")}</div></div>
+        <div class="kv"><div class="k">Phone</div><div class="v">${p.clientPhone ? `<a href="tel:${escapeHtml(p.clientPhone)}">${escapeHtml(p.clientPhone)}</a>` : "—"}</div></div>
+        <hr/>
+        <h2>Notes</h2>
+        <div class="sub">${escapeHtml(p.notes||"—")}</div>
+      ${projectEquipmentCard(p)}</div>
+    </div>
+  `;
+}
+
+function projectMap(p){
+  const addr = p.address || "";
+  const hasCoords = p.lat && p.lng;
+  const mapSrc = hasCoords
+    ? `https://www.openstreetmap.org/export/embed.html?marker=${encodeURIComponent(p.lat)}%2C${encodeURIComponent(p.lng)}&zoom=16`
+    : `https://www.openstreetmap.org/export/embed.html?search=${encodeURIComponent(addr)}&zoom=16`;
+  // Note: OSM embed doesn't always support search param everywhere; fallback is showing map homepage with query in link.
+  const link = hasCoords
+    ? `https://www.openstreetmap.org/?mlat=${encodeURIComponent(p.lat)}&mlon=${encodeURIComponent(p.lng)}#map=16/${encodeURIComponent(p.lat)}/${encodeURIComponent(p.lng)}`
+    : `https://www.openstreetmap.org/search?query=${encodeURIComponent(addr)}`;
+  return `
+    <div class="card">
+      <div class="row space">
+        <h2>Live Map</h2>
+        <div class="row noPrint">
+          <button class="btn" id="copyAddr" type="button">Copy address</button>
+          <a class="btn" href="${link}" target="_blank" rel="noopener">Open map</a>
+        </div>
+      </div>
+      <div class="sub">${escapeHtml(addr || "No address saved.")}</div>
+      <div style="margin-top:12px; border-radius:16px; overflow:hidden; border:1px solid var(--border)">
+        <iframe title="map" src="${mapSrc}" style="width:100%; height:420px; border:0"></iframe>
+      </div>
+      <div class="smallmuted" style="margin-top:10px">
+        Tip: Use “Geocode address” in Edit Project for best accuracy.
+      </div>
+    </div>
+  `;
+}
+
+function bindProjectTabEvents(p, tab){
+  if(tab==="overview"){
+    $("#quickTask").onclick = ()=> openTaskForm({ projectId:p.id });
+    $("#quickDiary").onclick = ()=> openDiaryForm({ projectId:p.id });
+    $("#quickVar").onclick = ()=> openVariationForm({ projectId:p.id });
+
+    // Equipment assign/remove on project overview
+    $$("#tabContent [data-assign-equipment]").forEach(b=> b.onclick = ()=>{
+      const pid = b.getAttribute("data-assign-equipment") || p.id;
+      openModal(assignEquipmentModal(pid));
+      bindAssignEquipmentModal(pid);
+    });
+    $$("#tabContent [data-unassign-equipment]").forEach(b=> b.onclick = ()=>{
+      const eqId = b.getAttribute("data-unassign-equipment");
+      if(!eqId) return;
+      const e = equipmentById(eqId);
+      if(!e) return;
+      const next = { ...e, projectId:"" };
+      upsertEquipment(next);
+      render();
+    });
+  }
+  if(tab==="map"){
+    $("#copyAddr") && ($("#copyAddr").onclick = async ()=>{
+      try{ await navigator.clipboard.writeText(p.address || ""); alert("Copied."); }catch(e){ alert("Copy failed."); }
+    });
+  }
+  if(tab==="tasks"){
+    $("#addTaskProj").onclick = ()=> openTaskForm({ projectId:p.id });
+    $$("#taskListProj [data-action='edit']").forEach(b=>b.onclick = ()=> openTaskForm(state.tasks.find(t=>String(t.id)===String(b.dataset.id))));
+    $$("#taskListProj [data-action='delete']").forEach(b=>b.onclick = ()=>{
+      const t = state.tasks.find(x=>String(x.id)===String(b.dataset.id));
+      if(t && confirmDelete(`task "${t.title}"`)){
+        state.tasks = softDeleteById(state.tasks, t.id);
+// NOTE: soft delete handled elsewhere
+
+        saveState(state); renderTasks(app, { projectId });
+render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+      }
+    });
+  }
+  if(tab==="diary"){
+    $("#addDiaryProj").onclick = ()=> openDiaryForm({ projectId:p.id });
+    $$("#diaryListProj [data-action='edit']").forEach(b=>b.onclick = ()=> openDiaryForm(state.diary.find(d=>String(d.id)===String(b.dataset.id))));
+    $$("#diaryListProj [data-action='delete']").forEach(b=>b.onclick = ()=>{
+      const d = state.diary.find(x=>String(x.id)===String(b.dataset.id));
+      if(d && confirmDelete(`diary entry ${dateFmt(d.date)}`)){
+        state.diary = softDeleteById(state.diary, d.id);
+// NOTE: soft delete handled elsewhere
+
+        saveState(state); renderDiary(app, { projectId });
+render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+      }
+    });
+  }
+  
+  if(tab==="programme"){
+    $("#progTpl") && ($("#progTpl").value = (p.programmeTemplateKey || "standard_nz"));
+    $("#progCx") && ($("#progCx").value = (p.programmeComplexity || "Moderate"));
+    $("#progGen") && ($("#progGen").onclick = ()=>{
+      const tpl = $("#progTpl").value;
+      const cx = $("#progCx").value;
+      const sd = $("#progStart").value;
+      p.programmeStartDate = sd || p.programmeStartDate || fmtISO(new Date());
+      generateProgrammeForProject(p, { templateKey: tpl, complexity: cx });
+      render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+    });
+  }
+if(tab==="variations"){
+    $("#addVarProj").onclick = ()=> openVariationForm({ projectId:p.id });
+    $$("#varListProj [data-action='edit']").forEach(b=>b.onclick = ()=> openVariationForm(state.variations.find(v=>String(v.id)===String(b.dataset.id))));
+    $$("#varListProj [data-action='delete']").forEach(b=>b.onclick = ()=>{
+      const v = state.variations.find(x=>String(x.id)===String(b.dataset.id));
+      if(v && confirmDelete(`variation "${v.title}"`)){
+        state.variations = softDeleteById(state.variations, v.id);
+// NOTE: soft delete handled elsewhere
+
+        saveState(state); render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+      }
+    });
+  }
+  if(tab==="subbies"){
+    // Create subbie from within this project: default projectId to this project.
+    $("#addSubbie").onclick = ()=> openSubbieForm({ projectId: p.id });
+    $("#addSubbieBottom") && ($("#addSubbieBottom").onclick = ()=> openSubbieForm({ projectId: p.id }));
+    $$("#subbieListProj [data-action='edit']").forEach(b=>b.onclick = ()=> openSubbieForm(subbieById(b.dataset.id)));
+    $$("#subbieListProj [data-action='delete']").forEach(b=>b.onclick = ()=>{
+      const s = subbieById(b.dataset.id);
+      if(s && confirmDelete(`subbie "${s.name}"`)){
+        state.subbies = softDeleteById(state.subbies, s.id);
+// NOTE: soft delete handled elsewhere
+
+        // unassign from tasks
+        const now = new Date().toISOString();
+        state.tasks = (state.tasks||[]).map(t => (t && t.assignedSubbieId===s.id)
+          ? { ...t, assignedSubbieId: null, updatedAt: now }
+          : t
+        );
+        saveState(state); render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+      }
+    });
+  }
+  if(tab==="deliveries"){
+    $("#addDelivery").onclick = ()=> openDeliveryForm({ projectId:p.id });
+    $$("#deliveryListProj [data-action='edit']").forEach(b=>b.onclick = ()=> openDeliveryForm(state.deliveries.find(d=>String(d.id)===String(b.dataset.id))));
+    $$("#deliveryListProj [data-action='delete']").forEach(b=>b.onclick = ()=>{
+      const d = state.deliveries.find(x=>String(x.id)===String(b.dataset.id));
+      if(d && confirmDelete(`delivery "${d.supplier || 'delivery'}"`)){
+        state.deliveries = softDeleteById(state.deliveries, d.id);
+// NOTE: soft delete handled elsewhere
+
+        saveState(state); render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+      }
+    });
+  }
+  if(tab==="inspections"){
+    $("#addInspection").onclick = ()=> openInspectionForm({ projectId:p.id });
+    $("#cccPlanBtn") && ($("#cccPlanBtn").onclick = ()=> openCCCPlanModal(p));
+    $$("#inspectionListProj [data-action='edit']").forEach(b=>b.onclick = ()=> openInspectionForm(state.inspections.find(i=>String(i.id)===String(b.dataset.id))));
+    $$("#inspectionListProj [data-action='delete']").forEach(b=>b.onclick = ()=>{
+      const i = state.inspections.find(x=>String(x.id)===String(b.dataset.id));
+      if(i && confirmDelete(`inspection "${i.type}"`)){
+        state.inspections = softDeleteById(state.inspections, i.id);
+// NOTE: soft delete handled elsewhere
+
+        saveState(state); render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+      }
+    });
+  }
+  if(tab==="reports"){
+    $("#runProjectReport").onclick = ()=> runReportUI(p.id);
+    $("#hnryExportProj").onclick = ()=> runHnryExportUI(p.id);
+  }
+}
+
+// Project tab renderers
+function projectTasks(p){
+  const tasks = aliveArr(state.tasks)
+    .filter(t=>t.projectId===p.id && isAlive(t))
+    .filter(taskVisibleToCurrentUser)
+    .sort((a,b)=>(b.updatedAt||"").localeCompare(a.updatedAt||""));
+  return `
+    <div class="card">
+      <div class="row space">
+        <h2>Tasks</h2>
+        <button class="btn primary" id="addTaskProj" type="button">New task</button>
+      </div>
+      <div class="list" id="taskListProj">
+        ${tasks.length ? tasks.map(taskRow).join("") : `<div class="sub">No tasks yet.</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function taskRow(t){
+  const badgeClass = t.status==="Done" ? "ok" : (t.status==="In progress" ? "warn" : "");
+  const subbie = t.assignedSubbieId ? subbieById(t.assignedSubbieId) : null;
+  const worker = t.assignedWorkerId ? workerById(t.assignedWorkerId) : null;
+  return `
+    <div class="item">
+      <div class="row space">
+        <div>
+          <div class="title">${escapeHtml(t.title)}</div>
+          <div class="meta">
+            <span class="badge ${badgeClass}">${escapeHtml(t.status||"To do")}</span>
+            ${worker ? `<span class="badge">🧑‍🔧 ${escapeHtml(worker.name)}</span>` : (t.assignedWorkerName ? `<span class="badge">🧑‍🔧 ${escapeHtml(t.assignedWorkerName)}</span>` : "")}
+            ${subbie ? `<span class="badge">👷 ${escapeHtml(subbie.name)}</span>` : ""}
+            ${t.dueDate ? `<span class="badge">📅 ${dateFmt(t.dueDate)}</span>` : ""}
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn small" data-action="edit" data-id="${t.id}" type="button">Edit</button>
+          <button class="btn small danger" data-action="delete" data-id="${t.id}" type="button">Delete</button>
+        </div>
+      </div>
+      ${t.photos?.length ? `<div class="thumbgrid">${t.photos.slice(0,6).map(ph=>`<div class="thumb"><img src="${ph.dataUrl}" alt="${escapeHtml(ph.name)}"/></div>`).join("")}</div>` : ""}
+    </div>
+  `;
+}
+
+function projectDiary(p){
+  const entries = aliveArr(state.diary)
+    .filter(d=>d.projectId===p.id && isAlive(d))
+    .filter(diaryVisibleToCurrentUser)
+    .sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  return `
+    <div class="card">
+      <div class="row space">
+        <h2>Diary</h2>
+        <button class="btn primary" id="addDiaryProj" type="button">New entry</button>
+      </div>
+      <div class="list" id="diaryListProj">
+        ${entries.length ? entries.map(diaryRow).join("") : `<div class="sub">No diary entries yet.</div>`}
+      </div>
+    </div>
+  `;
+}
+function diaryRow(d){
+  return `
+    <div class="item">
+      <div class="row space">
+        <div>
+          <div class="title">${dateFmt(d.date)}</div>
+          <div class="meta">${escapeHtml((d.summary||"").slice(0,140))}</div>
+          <div class="meta">
+            ${d.hours ? `<span class="badge">⏱ ${escapeHtml(String(d.hours))}h</span>` : ""}
+            ${d.billable ? `<span class="badge ok">Billable</span>` : `<span class="badge">Non‑billable</span>`}
+            ${d.category ? `<span class="badge">${escapeHtml(d.category)}</span>` : ""}
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn small" data-action="edit" data-id="${d.id}" type="button">Edit</button>
+          <button class="btn small danger" data-action="delete" data-id="${d.id}" type="button">Delete</button>
+        </div>
+      </div>
+      ${d.photos?.length ? `<div class="thumbgrid">${d.photos.slice(0,6).map(ph=>`<div class="thumb"><img src="${ph.dataUrl}" alt="${escapeHtml(ph.name)}"/></div>`).join("")}</div>` : ""}
+    </div>
+  `;
+}
+
+function projectVariations(p){
+  const vars = aliveArr(state.variations)
+    .filter(v=>v.projectId===p.id && isAlive(v))
+    .sort((a,b)=>(b.updatedAt||"").localeCompare(a.updatedAt||""));
+  return `
+    <div class="card">
+      <div class="row space">
+        <h2>Variations</h2>
+        <button class="btn primary" id="addVarProj" type="button">New variation</button>
+      </div>
+      <div class="list" id="varListProj">
+        ${vars.length ? vars.map(variationRow).join("") : `<div class="sub">No variations yet.</div>`}
+      </div>
+    </div>
+  `;
+}
+function variationRow(v){
+  const badgeClass = v.status==="Approved" ? "ok" : (v.status==="Sent" ? "warn" : "");
+  return `
+    <div class="item">
+      <div class="row space">
+        <div>
+          <div class="title">${escapeHtml(v.title)}</div>
+          <div class="meta">
+            <span class="badge ${badgeClass}">${escapeHtml(v.status||"Draft")}</span>
+            ${v.amount ? `<span class="badge">💲 ${money(v.amount)}</span>` : ""}
+            ${v.date ? `<span class="badge">📅 ${dateFmt(v.date)}</span>` : ""}
+          </div>
+          <div class="meta">${escapeHtml((v.description||"").slice(0,160))}</div>
+        </div>
+        <div class="row">
+          <button class="btn small" data-action="edit" data-id="${v.id}" type="button">Edit</button>
+          <button class="btn small danger" data-action="delete" data-id="${v.id}" type="button">Delete</button>
+        </div>
+      </div>
+      ${v.photos?.length ? `<div class="thumbgrid">${v.photos.slice(0,6).map(ph=>`<div class="thumb"><img src="${ph.dataUrl}" alt="${escapeHtml(ph.name)}"/></div>`).join("")}</div>` : ""}
+    </div>
+  `;
+}
+
+function projectSubbies(p){
+  // subbies are global; show with quick assign by using tasks, etc.
+  const subbies = aliveArr(state.subbies).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  const used = new Set(alive(state.tasks).filter(t=>t.projectId===p.id && isAlive(t)).map(t=>t.assignedSubbieId).filter(Boolean));
+  return `
+    <div class="card">
+      <div class="row space">
+        <h2>Subbies</h2>
+        <button class="btn primary" id="addSubbie" type="button">Add subbie</button>
+      </div>
+      <div class="sub">Subbies are shared across projects. Assign them to tasks.</div>
+      <hr/>
+      <div class="list" id="subbieListProj">
+        ${subbies.length ? subbies.map(s=>subbieRow(s, used.has(s.id))).join("") : `<div class="sub">No subcontractors saved yet.</div>`}
+      </div>
+
+      <div class="row" style="margin-top:12px">
+        <button class="btn primary" id="addSubbieBottom" type="button" style="width:100%">Add subbie</button>
+      </div>
+    </div>
+  `;
+}
+function subbieRow(s, used){
+  return `
+    <div class="item">
+      <div class="row space">
+        <div>
+          <div class="title">${escapeHtml(s.name)}</div>
+          <div class="meta">
+            ${s.trade ? `<span class="badge">${escapeHtml(s.trade)}</span>` : ""}
+            ${used ? `<span class="badge ok">Assigned on this job</span>` : ""}
+          </div>
+          <div class="meta">
+            ${s.phone ? `<a href="tel:${escapeHtml(s.phone)}">${escapeHtml(s.phone)}</a>` : ""}
+            ${s.email ? ` • <a href="mailto:${escapeHtml(s.email)}">${escapeHtml(s.email)}</a>` : ""}
+          </div>
+          ${s.notes ? `<div class="meta">${escapeHtml(s.notes)}</div>` : ""}
+        </div>
+        <div class="row">
+          <button class="btn small" data-action="edit" data-id="${s.id}" type="button">Edit</button>
+          <button class="btn small danger" data-action="delete" data-id="${s.id}" type="button">Delete</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function projectDeliveries(p){
+  const deliveries = aliveArr(state.deliveries)
+    .filter(d=>d.projectId===p.id && isAlive(d))
+    .sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  return `
+    <div class="card">
+      <div class="row space">
+        <h2>Deliveries</h2>
+        <button class="btn primary" id="addDelivery" type="button">New delivery</button>
+      </div>
+      <div class="list" id="deliveryListProj">
+        ${deliveries.length ? deliveries.map(deliveryRow).join("") : `<div class="sub">No deliveries logged yet.</div>`}
+      </div>
+    </div>
+  `;
+}
+function deliveryRow(d){
+  const badgeClass = d.status==="Delivered" ? "ok" : (d.status==="Missing/Damaged" ? "bad" : "warn");
+  return `
+    <div class="item">
+      <div class="row space">
+        <div>
+          <div class="title">${escapeHtml(d.supplier || "Delivery")}</div>
+          <div class="meta">
+            <span class="badge ${badgeClass}">${escapeHtml(d.status||"Expected")}</span>
+            ${d.date ? `<span class="badge">📅 ${dateFmt(d.date)}</span>` : ""}
+          </div>
+          <div class="meta">${escapeHtml((d.items||"").slice(0,180))}</div>
+          ${d.dropPoint ? `<div class="meta">Drop: ${escapeHtml(d.dropPoint)}</div>` : ""}
+        </div>
+        <div class="row">
+          <button class="btn small" data-action="edit" data-id="${d.id}" type="button">Edit</button>
+          <button class="btn small danger" data-action="delete" data-id="${d.id}" type="button">Delete</button>
+        </div>
+      </div>
+      ${d.photos?.length ? `<div class="thumbgrid">${d.photos.slice(0,6).map(ph=>`<div class="thumb"><img src="${ph.dataUrl}" alt="${escapeHtml(ph.name)}"/></div>`).join("")}</div>` : ""}
+    </div>
+  `;
+}
+
+function projectInspections(p){
+  const inspections = aliveArr(state.inspections)
+    .filter(i=>i.projectId===p.id && isAlive(i))
+    .sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+  const planned = (p.cccPlanTypes && Array.isArray(p.cccPlanTypes)) ? p.cccPlanTypes : [];
+  const ccc = buildCCCStatus(p.id, inspections, planned);
+  const plannedCount = planned.length;
+  const plannedList = cccSortTypes(planned);
+  return `
+    <div class="grid two">
+      <div class="card">
+        <div class="row space">
+          <h2>Inspections</h2>
+          <button class="btn primary" id="addInspection" type="button">New inspection</button>
+        </div>
+        <div class="list" id="inspectionListProj">
+          ${inspections.length ? inspections.map(inspectionRow).join("") : `<div class="sub">No inspections scheduled yet.</div>`}
+        </div>
+      </div>
+      <div class="card">
+        <h2>CCC tracker</h2>
+        <div class="sub">Pick which inspections apply to this job (planning). Scheduling is optional.</div>
+        <div class="row space noPrint" style="margin-top:10px">
+          <div class="sub"><strong id="cccPlannedCount">${plannedCount}</strong> planned</div>
+          <button class="btn" id="cccPlanBtn" type="button">Choose inspections</button>
+        </div>
+        ${plannedList.length ? `<div class="sub" style="margin-top:8px">Order: ${plannedList.map(t=>`<span class="badge">${escapeHtml(t)}</span>`).join(" ")}</div>` : `<div class="sub" style="margin-top:8px">No planned inspections yet. Choose inspections to build your CCC plan.</div>`}
+        <hr/>
+        ${ccc}
+      </div>
+    </div>
+  `;
+}
+function inspectionRow(i){
+  const cls = i.result==="Pass" ? "ok" : (i.result==="Fail" ? "bad" : "warn");
+  return `
+    <div class="item">
+      <div class="row space">
+        <div>
+          <div class="title">${escapeHtml(i.type || "Inspection")}</div>
+          <div class="meta">
+            <span class="badge ${cls}">${escapeHtml(i.result || "Booked")}</span>
+            ${i.date ? `<span class="badge">📅 ${dateFmt(i.date)}</span>` : ""}
+            ${i.inspector ? `<span class="badge">👤 ${escapeHtml(i.inspector)}</span>` : ""}
+          </div>
+          ${i.notes ? `<div class="meta">${escapeHtml(i.notes)}</div>` : ""}
+        </div>
+        <div class="row">
+          <button class="btn small" data-action="edit" data-id="${i.id}" type="button">Edit</button>
+          <button class="btn small danger" data-action="delete" data-id="${i.id}" type="button">Delete</button>
+        </div>
+      </div>
+      ${i.photos?.length ? `<div class="thumbgrid">${i.photos.slice(0,6).map(ph=>`<div class="thumb"><img src="${ph.dataUrl}" alt="${escapeHtml(ph.name)}"/></div>`).join("")}</div>` : ""}
+    </div>
+  `;
+}
+function buildCCCStatus(projectId, inspections, plannedTypes){
+  const planned = Array.isArray(plannedTypes) && plannedTypes.length ? cccSortTypes(plannedTypes) : cccSortTypes(["Pre-slab / Pre-pour (foundations)","Framing / pre-line inspection","Insulation inspection","Final building inspection / CCC final"]);
+  const norm = s=>String(s||"").trim().toLowerCase();
+  const rows = planned.map(t=>{
+    const hits = inspections.filter(i=> norm(i.type)===norm(t) && isAlive(i));
+    let status = "Pending";
+    let cls = "warn";
+    if(hits.some(h=>h.result==="Pass")){ status="Passed"; cls="ok"; }
+    else if(hits.some(h=>h.result==="Fail")){ status="Failed"; cls="bad"; }
+    else if(hits.length){ status = hits[0].result || "Booked"; cls="warn"; }
+    const badge = status==="Passed" ? `<span class="badge ok">✔ Passed</span>` :
+                  status==="Failed" ? `<span class="badge bad">✖ Failed</span>` :
+                  `<span class="badge warn">⏳ ${escapeHtml(status)}</span>`;
+    return `<div class="row space"><div><strong>${escapeHtml(t)}</strong></div><div>${badge}</div></div>`;
+  }).join("<hr/>");
+  return rows;
+}
+
+
+function projectReports(p){
+  return `
+    <div class="card">
+      <div class="row space">
+        <h2>Reports</h2>
+        <div class="row">
+          <button class="btn" id="hnryExportProj" type="button">Hnry Invoice Export</button>
+          <button class="btn primary" id="runProjectReport" type="button">Run Job Report</button>
+        </div>
+      </div>
+      <div class="sub">
+        Job Report = printable client/internal summary (diary + tasks + variations + deliveries + inspections).<br/>
+        Hnry Export = copy/paste line items from diary entries.
+      </div>
+    </div>
+  `;
+}
+
+// ----------------- Tasks (global) -----------------
+function renderTasks(app, params){
+  setHeader("Tasks");
+  const projectId = params.projectId || "";
+  const selectedId = params.id || "";
+  const projects = aliveArr(state.projects).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  const tasks = aliveArr(state.tasks)
+    .filter(t=> !projectId || t.projectId===projectId)
+    .filter(taskVisibleToCurrentUser)
+    .slice()
+    .sort((a,b)=>(b.updatedAt||"").localeCompare(a.updatedAt||""));
+  
+  if(selectedId){
+    const tsel = aliveArr(state.tasks).find(t=>String(t.id)===String(selectedId));
+    if(tsel){
+      if(!taskVisibleToCurrentUser(tsel)){
+        alert("You can only view your own tasks in worker mode.");
+        navTo("tasks", projectId ? {projectId} : {});
+        return;
+      }
+      state.uiSelections.tasks = state.uiSelections.tasks || {};
+      // If we are in split-pane mode, update the side panel only.
+      if(document.getElementById("taskDetailBody")){
+        updateTaskDetailPanel(tsel, projectId);
+        return;
+      }
+      // Otherwise (mobile / single-pane), render full detail view.
+      app.innerHTML = renderTaskDetail(tsel);
+      bindTaskDetail(tsel, projectId);
+      return;
+    } else {
+      // stale selection
+      state.uiSelections.tasks = state.uiSelections.tasks || {};
+      delete state.uiSelections.tasks.selectedId;
+      saveState(state);
+    }
+  
+  // fill_taskDetailBody
+  try{
+    const sid = getSelected("tasks");
+    const body = document.getElementById("taskDetailBody");
+    if(body){
+      const item = sid ? aliveArr(state.tasks).find(x=>String(x.id)===String(sid)) : null;
+      body.innerHTML = renderTaskDetailPane(item);
+      if(item) bindTaskDetailPane(item);
+    }
+  }catch(e){}
+
+}
+app.innerHTML = `
+    <div class="card">
+      <div class="row space">
+        <h2>Tasks</h2>
+        <button class="btn primary" id="newTask" type="button">New Task</button>
+      </div>
+      <div class="grid two">
+        <div>
+          <label>Filter by project</label>
+          <select id="taskProjectFilter" class="input">
+            <option value="">All projects</option>
+            ${projects.map(p=>`<option value="${p.id}" ${p.id===projectId?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}
+          </select>
+        </div>
+        <div></div>
+      </div>
+      <hr/>
+      <div class="list" id="taskList">${tasks.length ? tasks.map(taskRowWithProject).join("") : `<div class="sub">No tasks yet.</div>`}</div>
+    </div>
+  `;
+  const _nt = $("#newTask");
+  if(_nt){
+    if(!canEdit("tasks")){ _nt.style.display = "none"; }
+    else _nt.onclick = ()=> openTaskForm(projectId ? { projectId } : {});
+  }
+  $("#taskProjectFilter").onchange = (e)=>{
+    const v = e.target.value;
+    navTo("tasks", v ? {projectId:v} : {});
+  };
+
+  $$("#taskList [data-action='open']").forEach(row=>row.onclick = ()=>{
+    const id = row.dataset.id;
+    navTo("tasks", Object.assign({}, projectId ? {projectId} : {}, { id }));
+  });
+}
+function taskRowWithProject(t){
+  const p = projectById(t.projectId);
+  const status = t.status || "Open";
+  const due = t.dueDate ? dateFmt(t.dueDate) : "";
+  const aw = t.assignedWorkerId ? (workerById(t.assignedWorkerId)?.name || t.assignedWorkerName || "") : (t.assignedWorkerName||"");
+  const as = t.assignedSubbieId ? (subbieById(t.assignedSubbieId)?.name||"") : (t.subbieId ? (subbieById(t.subbieId)?.name||"") : "");
+  const assigned = t.assignedToName || aw || as || "";
+  const metaBits = [
+    p ? escapeHtml(p.name||p.address||"") : "No project",
+    due ? ("Due " + escapeHtml(due)) : "",
+    assigned ? ("Assigned " + escapeHtml(assigned)) : ""
+  ].filter(Boolean).join(" • ");
+  const badge = `<span class="fwBadge ${statusBadgeClass(status)}">${escapeHtml(status)}</span>`;
+  return `
+    <div class="fwListItem" data-action="open" data-id="${t.id}">
+      <div class="fwMain">
+        <div class="fwTitleRow">
+          <div class="fwTitle">${escapeHtml(t.title || "(Untitled task)")}</div>
+          ${badge}
+        </div>
+        <div class="fwMeta">${escapeHtml(metaBits || " ")}</div>
+      </div>
+      <div class="fwChevron">›</div>
+    </div>
+  `;
+}
+
+function renderTaskDetail(t){
+  const p = projectById(t.projectId);
+  const status = t.status || "Open";
+  const due = t.dueDate ? dateFmt(t.dueDate) : "";
+  const created = t.createdAt ? dateFmt(String(t.createdAt).slice(0,10)) : "";
+  const updated = t.updatedAt ? dateFmt(String(t.updatedAt).slice(0,10)) : "";
+  const enteredBy = t.createdByName || "";
+  const updatedBy = t.updatedByName || "";
+  const photosTaken = !!(t.photosTaken || (t.photosJson && String(t.photosJson).trim()) || (t.photos && t.photos.length));
+  return `
+    <div class="fwDetail">
+      <div class="fwDetailTop">
+        <button class="btn" id="taskBack" type="button">Back</button>
+        <div class="fwDetailActions">
+          <button class="btn" id="taskEdit" type="button">Edit</button>
+          <button class="btn danger" id="taskDelete" type="button">Delete</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="fwH1">${escapeHtml(t.title || "(Untitled task)")}</div>
+        <div class="fwMeta">${p ? escapeHtml(p.name||p.address||"") : "No project"}</div>
+
+        <div class="fwBadgeRow">
+          <span class="fwBadge ${statusBadgeClass(status)}">${escapeHtml(status)}</span>
+          ${due ? `<span class="fwBadge muted">Due ${escapeHtml(due)}</span>` : ``}
+          ${photosTaken ? `<span class="fwBadge ok">Photos taken</span>` : `<span class="fwBadge muted">No photos</span>`}
+        </div>
+
+        <div class="fwSection">
+          <div class="fwSectionTitle">Details</div>
+          <div class="fwKV">
+            ${kv("Details", (t.details || t.description || t.notes || "") || "—")}
+            ${kv("Assigned", (t.assignedToName || (t.assignedWorkerId ? (workerById(t.assignedWorkerId)?.name || t.assignedWorkerName || "") : (t.assignedWorkerName||"")) || (t.assignedSubbieId ? (subbieById(t.assignedSubbieId)?.name||"") : (t.subbieId ? (subbieById(t.subbieId)?.name||"") : ""))) || "—")}
+            ${kv("Due date", due || "—")}
+            ${kv("Created", created || "—")}
+            ${kv("Updated", updated || "—")}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+function bindTaskDetail(t, projectId){
+  $("#taskBack").onclick = ()=>{
+    if(state.uiSelections?.tasks) delete state.uiSelections.tasks.selectedId;
+    saveState(state);
+    navTo("tasks", projectId ? {projectId} : {});
+  };
+  $("#taskEdit").onclick = ()=> openTaskForm(t);
+  $("#taskDelete").onclick = ()=>{
+    if(confirmDelete(`task "${t.title}"`)){
+      state.tasks = softDeleteById(state.tasks, t.id);
+      if(state.uiSelections?.tasks) delete state.uiSelections.tasks.selectedId;
+      saveState(state);
+      navTo("tasks", projectId ? {projectId} : {});
+    }
+  };
+}
+
+function openTaskForm(seed={}){
+  if(workerModeEnabled() && !canEdit("tasks")){
+    alert("This worker profile can't edit tasks.");
+    return;
+  }
+
+  const isEdit = !!seed.id;
+  const rw = restrictedWorker();
+  const t = isEdit ? seed : {
+    id: uid(),
+    projectId: seed.projectId || (state.projects[0]?.id || ""),
+    title: "",
+    details: "",
+    status: "To do",
+    dueDate: "",
+    assignedSubbieId: null,
+    assignedWorkerId: rw ? String(rw.id||"") : null,
+    assignedWorkerName: rw ? String(rw.name||"Worker") : "",
+    photos: [],
+    photosTaken: false,
+    photosJson: "[]",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  const projects = aliveArr(state.projects).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  const subbies = aliveArr(state.subbies).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  const workers = aliveArr((settings.workers||[])).filter(w=>w && !w.isAdmin).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  const lockAssign = !!rw;
+  showModal(`
+    <div class="row space">
+      <h2>${isEdit ? "Edit Task" : "New Task"}</h2>
+      <button class="btn" id="closeM" type="button">Close</button>
+    </div>
+    <label>Project</label>
+    <select id="t_project" class="input">
+      ${projects.map(p=>`<option value="${p.id}" ${p.id===t.projectId?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}
+    </select>
+    <label>Title</label>
+    <input id="t_title" class="input" value="${escapeHtml(t.title)}" placeholder="e.g., Fit off bathroom, fix jamb, order LVL" />
+    <label>Details</label>
+    <textarea id="t_details" class="input" placeholder="Notes for you / subbie">${escapeHtml(t.details||"")}</textarea>
+    <div class="grid two">
+      <div>
+        <label>Status</label>
+        <select id="t_status" class="input">
+          ${["To do","In progress","Blocked","Done"].map(s=>`<option ${s===t.status?"selected":""}>${s}</option>`).join("")}
+        </select>
+      </div>
+      <div>
+        <label>Due date</label>
+        <input id="t_due" class="input" type="date" value="${escapeHtml(t.dueDate||"")}" />
+      </div>
+    </div>
+    <label>Assign to worker (optional)</label>
+    <select id="t_worker" class="input" ${lockAssign?"disabled":""}>
+      <option value="">Unassigned</option>
+      ${workers.map(w=>`<option value="${w.id}" ${String(w.id)===String(t.assignedWorkerId||"")?"selected":""}>${escapeHtml(w.name||"Worker")}</option>`).join("")}
+    </select>
+    <label>Assign to subbie (optional)</label>
+    <select id="t_subbie" class="input" ${lockAssign?"disabled":""}>
+      <option value="">Unassigned</option>
+      ${subbies.map(s=>`<option value="${s.id}" ${s.id===t.assignedSubbieId?"selected":""}>${escapeHtml(s.name)}${s.trade?` — ${escapeHtml(s.trade)}`:""}</option>`).join("")}
+    </select>
+    ${lockAssign ? `<div class="small" style="opacity:.85">In worker mode you can't reassign tasks.</div>` : ``}
+
+    <label class="checkboxRow">
+      <input id="t_photosTaken" class="input" type="checkbox" ${((t.photosJson&&String(t.photosJson).trim()) || (t.photos&&t.photos.length)) ? "checked" : ""} />
+      Photos taken
+    </label>
+    <div class="small" style="opacity:.8">Store photos externally (not uploaded in-app).</div>
+<hr/>
+    <div class="row space actionsSticky">
+      <button class="btn primary" id="saveT" type="button">${isEdit ? "Save" : "Create"}</button>
+      <button class="btn" id="cancelT" type="button">Cancel</button>
+      ${isEdit ? `<button class="btn danger" id="delT" type="button">Delete</button>` : ""}
+    </div>
+  `);
+  $("#closeM").onclick = closeModal;
+  $("#cancelT").onclick = closeModal;
+
+  $("#saveT").onclick = async ()=>{
+    const __btn = $("#saveT");
+    setBtnBusy(__btn, true);
+    const __hint = showSavingHint("Saving…");
+    try{
+t.projectId = $("#t_project").value;
+    t.title = $("#t_title").value.trim();
+    t.details = $("#t_details").value.trim();
+    t.status = $("#t_status").value;
+    t.dueDate = $("#t_due").value;
+    // Assignment: worker takes precedence; if set we clear subbie.
+    const wid = $("#t_worker") ? ($("#t_worker").value || null) : null;
+    const sid = $("#t_subbie") ? ($("#t_subbie").value || null) : null;
+    if(wid){
+      const w = workerById(wid);
+      t.assignedWorkerId = String(wid);
+      t.assignedWorkerName = String(w?.name || t.assignedWorkerName || "Worker");
+      t.assignedSubbieId = null;
+      t.assignedToName = t.assignedWorkerName;
+    } else {
+      t.assignedWorkerId = null;
+      t.assignedWorkerName = "";
+      t.assignedSubbieId = sid;
+      if(sid){
+        const s = subbieById(sid);
+        t.assignedToName = String(s?.name || "");
+      } else {
+        t.assignedToName = "";
+      }
+    }
+
+    t.photosJson = ($("#t_photosTaken") && $("#t_photosTaken").checked) ? "true" : "";
+    const actor = currentActor();
+    if(!isEdit){ t.createdById = actor.id; t.createdByName = actor.name; }
+    t.updatedById = actor.id; t.updatedByName = actor.name;
+t.updatedAt = new Date().toISOString();
+    if(!t.title) alert("Title required.");
+    if(isEdit){
+      state.tasks = alive(state.tasks).filter(isAlive).map(x=>x.id===t.id ? t : x);
+    }else{
+      state.tasks.unshift(t);
+    }
+    addActivity({ kind:"task", action:(isEdit?"update":"create"), entityId:t.id, projectId:t.projectId, title:t.title, actorId:actor.id, actorName:actor.name });
+    saveState(state);
+    closeModal();
+    render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+    } finally {
+      __hint && __hint.remove();
+      setBtnBusy(__btn, false);
+    }
+
+  };
+
+  $("#delT") && ($("#delT").onclick = ()=>{
+    if(confirmDelete(`task "${t.title}"`)){
+      state.tasks = softDeleteById(state.tasks, t.id);
+// NOTE: soft delete handled elsewhere
+
+      saveState(state);
+      renderTasks(app, { projectId });
+closeModal();
+      render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+    }
+  });
+}
+
+// ----------------- Diary (global) -----------------
+
+function openDiaryView(d){
+  if(!d) return;
+  const p = (state.projects||[]).find(x=>x.id===d.projectId);
+  showModal(`
+    <div class="row space">
+      <h2>Diary Entry</h2>
+      <div class="row">
+        <button class="btn" id="closeM" type="button">Close</button>
+        <button class="btn primary" id="editV" type="button">Edit</button>
+      </div>
+    </div>
+    <div class="sub"><strong>${escapeHtml(p?.name || "Project")}</strong><br/>${escapeHtml(p?.address || "")}</div>
+    <hr/>
+    <div class="kv"><div class="k">Date</div><div class="v">${escapeHtml(dateFmt(d.date))}</div></div>
+    <div class="kv"><div class="k">Category</div><div class="v">${escapeHtml(d.category||"")}</div></div>
+    <div class="kv"><div class="k">Billable</div><div class="v">${d.billable ? "Yes" : "No"}</div></div>
+    ${d.hours ? `<div class="kv"><div class="k">Hours</div><div class="v">${escapeHtml(String(d.hours))}</div></div>` : ""}
+    ${d.rate ? `<div class="kv"><div class="k">Rate</div><div class="v">${escapeHtml(String(d.rate))}</div></div>` : ""}
+    <hr/>
+    <h2 style="margin-top:0">Notes</h2>
+    <div class="sub" style="white-space:pre-wrap">${escapeHtml(d.summary||"—")}</div>
+    ${d.photos?.length ? `<hr/><h2 style="margin-top:0">Photos</h2><div class="thumbgrid">${d.photos.map(ph=>`<div class="thumb"><img src="${ph.dataUrl}" alt="${escapeHtml(ph.name)}"/></div>`).join("")}</div>` : ""}
+  `);
+  $("#closeM").onclick = closeModal;
+  $("#editV").onclick = ()=> openDiaryForm(d);
+}
+function renderDiary(app, params){
+  setHeader("Diary");
+  const projectId = params.projectId || "";
+  const selectedId = params.id || "";
+  const projects = aliveArr(state.projects).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  const entries = aliveArr(state.diary)
+    .filter(d=> !projectId || d.projectId===projectId)
+    .filter(diaryVisibleToCurrentUser)
+    .slice()
+    .sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  
+  if(selectedId){
+    const dsel = aliveArr(state.diary).find(d=>String(d.id)===String(selectedId));
+    if(dsel){
+      if(!diaryVisibleToCurrentUser(dsel)){
+        alert("You can only view your own diary entries in worker mode.");
+        navTo("diary", projectId ? {projectId} : {});
+        return;
+      }
+      state.uiSelections.diary = state.uiSelections.diary || {};
+      const hasPane = !!document.getElementById("diaryDetailBody");
+      if(hasPane){
+        updateDiaryDetailPanel(dsel, projectId);
+        // Pane binding is handled by bindDiaryDetailPane inside updateDiaryDetailPanel()
+      } else {
+        app.innerHTML = renderDiaryDetail(dsel);
+        bindDiaryDetail(dsel, projectId);
+      }
+      return;
+    } else {
+      state.uiSelections.diary = state.uiSelections.diary || {};
+      delete state.uiSelections.diary.selectedId;
+      saveState(state);
+    }
+  
+  // fill_diaryDetailBody
+  try{
+    const sid = getSelected("diary");
+    const body = document.getElementById("diaryDetailBody");
+    if(body){
+      const item = sid ? aliveArr(state.diary).find(x=>String(x.id)===String(sid)) : null;
+      body.innerHTML = renderDiaryDetailPane(item);
+      if(item) bindDiaryDetailPane(item);
+    }
+  }catch(e){}
+
+}
+app.innerHTML = `
+    <div class="card">
+      <div class="row space">
+        <h2>Diary</h2>
+        <button class="btn primary" id="newDiary" type="button">New Entry</button>
+      </div>
+      <div class="grid two">
+        <div>
+          <label>Filter by project</label>
+          <select id="diaryProjectFilter" class="input">
+            <option value="">All projects</option>
+            ${projects.map(p=>`<option value="${p.id}" ${p.id===projectId?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}
+          </select>
+        </div>
+        <div></div>
+      </div>
+      <hr/>
+      <div class="list" id="diaryList">${entries.length ? entries.map(diaryRowWithProject).join("") : `<div class="sub">No diary entries yet.</div>`}</div>
+    </div>
+  `;
+    const _nd = $("#newDiary");
+  if(_nd){
+    if(!canEdit("diary")){ _nd.style.display = "none"; }
+    else _nd.onclick = ()=> openDiaryForm(projectId ? { projectId } : {});
+  }
+  $("#diaryProjectFilter").onchange = (e)=>{
+    const v = e.target.value;
+    navTo("diary", v ? {projectId:v} : {});
+  };
+
+  $$("#diaryList [data-action='open']").forEach(row=>row.onclick = ()=>{
+    const id = row.dataset.id;
+    navTo("diary", Object.assign({}, projectId ? {projectId} : {}, { id }));
+  });
+  // (Fieldwire UI refactor) Delete is handled by detail view actions.
+}
+function diaryRowWithProject(d){
+  const p = projectById(d.projectId);
+  const date = d.date ? dateFmt(d.date) : "";
+  const hours = (d.hours!=null && d.hours!=="") ? `${escapeHtml(String(d.hours))}h` : "";
+  const photosTaken = !!(d.photosTaken || (d.photosJson && String(d.photosJson).trim()) || (d.photos && d.photos.length));
+  const metaBits = [
+    p ? escapeHtml(p.name||p.address||"") : "No project",
+    hours,
+    photosTaken ? "Photos taken" : ""
+  ].filter(Boolean).join(" • ");
+  return `
+    <div class="fwListItem" data-action="open" data-id="${d.id}">
+      <div class="fwMain">
+        <div class="fwTitleRow">
+          <div class="fwTitle">${escapeHtml(date || "Diary entry")}</div>
+          ${hours ? `<span class="fwBadge muted">${hours}</span>` : ``}
+        </div>
+        <div class="fwMeta">${escapeHtml(metaBits || " ")}</div>
+        ${d.notes ? `<div class="fwSub">${escapeHtml(String(d.notes).slice(0,90))}${String(d.notes).length>90?"…":""}</div>` : ``}
+      </div>
+      <div class="fwChevron">›</div>
+    </div>
+  `;
+}
+
+function renderDiaryDetail(d){
+  const p = projectById(d.projectId);
+  const date = d.date ? dateFmt(d.date) : "";
+  const hours = (d.hours!=null && d.hours!=="") ? `${escapeHtml(String(d.hours))} hours` : "—";
+  const photosTaken = !!(d.photosTaken || (d.photosJson && String(d.photosJson).trim()) || (d.photos && d.photos.length));
+  return `
+    <div class="fwDetail">
+      <div class="fwDetailTop">
+        <button class="btn" id="diaryBack" type="button">Back</button>
+        <div class="fwDetailActions">
+          <button class="btn" id="diaryEdit" type="button">Edit</button>
+          <button class="btn danger" id="diaryDelete" type="button">Delete</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="fwH1">${escapeHtml(date || "Diary entry")}</div>
+        <div class="fwMeta">${p ? escapeHtml(p.name||p.address||"") : "No project"}</div>
+
+        <div class="fwBadgeRow">
+          <span class="fwBadge muted">${hours}</span>
+          ${photosTaken ? `<span class="fwBadge ok">Photos taken</span>` : `<span class="fwBadge muted">No photos</span>`}
+        </div>
+
+        <div class="fwSection">
+          <div class="fwSectionTitle">Details</div>
+          <div class="fwKV">
+            ${kv("Entered by", d.createdByName || "—")}
+            ${kv("Weather", d.weather || "—")}
+            ${kv("Crew", d.crew || "—")}
+            ${kv("Notes", (d.notes || d.summary) || "—")}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+function bindDiaryDetail(d, projectId){
+  $("#diaryBack").onclick = ()=>{
+    if(state.uiSelections?.diary) delete state.uiSelections.diary.selectedId;
+    saveState(state);
+    navTo("diary", projectId ? {projectId} : {});
+  };
+  $("#diaryEdit").onclick = ()=> openDiaryForm(d);
+  $("#diaryDelete").onclick = ()=>{
+    if(confirmDelete(`diary entry ${dateFmt(d.date)}`)){
+      state.diary = softDeleteById(state.diary, d.id);
+      if(state.uiSelections?.diary) delete state.uiSelections.diary.selectedId;
+      saveState(state);
+      navTo("diary", projectId ? {projectId} : {});
+    }
+  };
+}
+
+function openDiaryForm(seed={}){
+  if(workerModeEnabled() && !canEdit("diary")){
+    alert("This worker profile can't edit diary.");
+    return;
+  }
+
+  const isEdit = !!seed.id;
+  const d = isEdit ? ({...seed}) : {
+    id: uid(),
+    projectId: seed.projectId || (state.projects[0]?.id || ""),
+    date: new Date().toISOString().slice(0,10),
+    summary: "",
+    notes: "",
+    weather: "",
+    crew: "",
+    hours: "",
+    billable: true,
+    category: "Labour",
+    rate: "",
+    photos: [],
+    photosTaken: false,
+    photosJson: "[]",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  // Align fields for older entries / different builds
+  if(d.notes == null || d.notes === "") d.notes = (d.summary || "");
+  if(d.summary == null || d.summary === "") d.summary = (d.notes || "");
+  if(d.weather == null) d.weather = "";
+  if(d.crew == null) d.crew = "";
+  const projects = aliveArr(state.projects).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  showModal(`
+    <div class="row space">
+      <h2>${isEdit ? "Edit Diary Entry" : "New Diary Entry"}</h2>
+      <button class="btn" id="closeM" type="button">Close</button>
+    </div>
+    <label>Project</label>
+    <select id="d_project" class="input">
+      ${projects.map(p=>`<option value="${p.id}" ${p.id===d.projectId?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}
+    </select>
+    <div class="grid two">
+      <div>
+        <label>Date</label>
+        <input id="d_date" class="input" type="date" value="${escapeHtml(d.date)}" />
+      </div>
+      <div>
+        <label>Hours (optional)</label>
+        <input id="d_hours" class="input" type="number" step="0.25" value="${escapeHtml(d.hours||"")}" placeholder="e.g., 7.5" />
+      </div>
+    </div>
+    <div class="grid two">
+      <div>
+        <label>Category</label>
+        <select id="d_cat" class="input">
+          ${["Labour","Materials","Travel","Plant","Other"].map(c=>`<option ${c===d.category?"selected":""}>${c}</option>`).join("")}
+        </select>
+      </div>
+      <div>
+        <label>Billable</label>
+        <select id="d_bill" class="input">
+          <option value="true" ${d.billable?"selected":""}>Yes</option>
+          <option value="false" ${!d.billable?"selected":""}>No</option>
+        </select>
+      </div>
+    </div>
+    <label>Rate (NZD/hr or item cost) — optional</label>
+    <input id="d_rate" class="input" type="number" step="0.01" value="${escapeHtml(d.rate||"")}" placeholder="Leave blank to use default labour rate in Settings" />
+    <div class="grid two">
+      <div>
+        <label>Weather</label>
+        <input id="d_weather" class="input" type="text" value="${escapeHtml(d.weather||"")}" placeholder="e.g., Fine / Showers / Windy" />
+      </div>
+      <div>
+        <label>Crew</label>
+        <input id="d_crew" class="input" type="text" value="${escapeHtml(d.crew||"")}" placeholder="e.g., Matt + 2, or subcontractors" />
+      </div>
+    </div>
+    <label>Notes</label>
+    <textarea id="d_notes" class="input" placeholder="What was done today?">${escapeHtml((d.notes||d.summary||""))}</textarea>
+    <label class="checkboxRow">
+      <input id="d_photosTaken" class="input" type="checkbox" ${((d.photosJson&&String(d.photosJson).trim()) || (d.photos&&d.photos.length)) ? "checked" : ""} />
+      Photos taken
+    </label>
+    <div class="small" style="opacity:.8">Store photos externally (not uploaded in-app).</div>
+<hr/>
+    <div class="row space actionsSticky">
+      <button class="btn primary" id="saveD" type="button">${isEdit ? "Save" : "Create"}</button>
+      <button class="btn" id="cancelD" type="button">Cancel</button>
+      ${isEdit ? `<button class="btn danger" id="delD" type="button">Delete</button>` : ""}
+    </div>
+  `);
+  $("#closeM").onclick = closeModal;
+  $("#cancelD").onclick = closeModal;
+
+  $("#saveD").onclick = async ()=>{
+    const __btn = $("#saveD");
+    setBtnBusy(__btn, true);
+    const __hint = showSavingHint("Saving…");
+    try{
+d.projectId = $("#d_project").value;
+    d.date = $("#d_date").value;
+    d.hours = $("#d_hours").value;
+    d.category = $("#d_cat").value;
+    d.billable = $("#d_bill").value === "true";
+    d.rate = $("#d_rate").value;
+    d.weather = $("#d_weather").value.trim();
+    d.crew = $("#d_crew").value.trim();
+    d.notes = $("#d_notes").value.trim();
+    d.summary = d.notes;
+    const actor = currentActor();
+    if(!isEdit){ d.createdById = actor.id; d.createdByName = actor.name; }
+    d.updatedById = actor.id; d.updatedByName = actor.name;
+d.updatedAt = new Date().toISOString();
+    if(!d.projectId) alert("Project required.");
+    if(!d.date) alert("Date required.");
+    if(isEdit){
+      state.diary = alive(state.diary).filter(isAlive).map(x=>x.id===d.id ? d : x);
+    }else{
+      state.diary.unshift(d);
+    }
+    addActivity({ kind:"diary", action:(isEdit?"update":"create"), entityId:d.id, projectId:d.projectId, date:d.date, actorId:actor.id, actorName:actor.name });
+    saveState(state);
+    closeModal();
+    render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+    } finally {
+      __hint && __hint.remove();
+      setBtnBusy(__btn, false);
+    }
+
+  };
+
+  $("#delD") && ($("#delD").onclick = ()=>{
+    if(confirmDelete(`diary entry ${dateFmt(d.date)}`)){
+      state.diary = softDeleteById(state.diary, d.id);
+// NOTE: soft delete handled elsewhere
+
+      saveState(state);
+      renderDiary(app, { projectId });
+closeModal();
+      render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+    }
+  });
+}
+
+// ----------------- Variations (global list is via project) -----------------
+function openVariationForm(seed={}){
+  const isEdit = !!seed.id;
+  const v = isEdit ? seed : {
+    id: uid(),
+    projectId: seed.projectId || (state.projects[0]?.id || ""),
+    date: new Date().toISOString().slice(0,10),
+    title: "",
+    description: "",
+    amount: "",
+    status: "Draft",
+    photos: [],
+    photosTaken: false,
+    photosJson: "[]",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  const projects = aliveArr(state.projects).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  showModal(`
+    <div class="row space">
+      <h2>${isEdit ? "Edit Variation" : "New Variation"}</h2>
+      <button class="btn" id="closeM" type="button">Close</button>
+    </div>
+    <label>Project</label>
+    <select id="v_project" class="input">
+      ${projects.map(p=>`<option value="${p.id}" ${p.id===v.projectId?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}
+    </select>
+    <div class="grid two">
+      <div>
+        <label>Date</label>
+        <input id="v_date" class="input" type="date" value="${escapeHtml(v.date||"")}" />
+      </div>
+      <div>
+        <label>Status</label>
+        <select id="v_status" class="input">
+          ${["Draft","Sent","Approved","Declined"].map(s=>`<option ${s===v.status?"selected":""}>${s}</option>`).join("")}
+        </select>
+      </div>
+    </div>
+    <label>Title</label>
+    <input id="v_title" class="input" value="${escapeHtml(v.title||"")}" placeholder="e.g., Extra soffit lining / Change of tiles" />
+    <label>Description</label>
+    <textarea id="v_desc" class="input" placeholder="Scope change, photos, notes">${escapeHtml(v.description||"")}</textarea>
+    <label>Amount (NZD)</label>
+    <input id="v_amount" class="input" type="number" step="0.01" value="${escapeHtml(v.amount||"")}" />
+    <label>Photos</label>
+    <input id="v_photos" class="input" type="hidden" accept="image/*" multiple />
+    ${v.photos?.length ? `<div class="thumbgrid">${v.photos.map(ph=>`<div class="thumb"><img src="${ph.dataUrl}" alt="${escapeHtml(ph.name)}"/></div>`).join("")}</div>` : ""}
+    <hr/>
+    <div class="row space actionsSticky">
+      <button class="btn primary" id="saveV" type="button">${isEdit ? "Save" : "Create"}</button>
+      <button class="btn" id="cancelV" type="button">Cancel</button>
+      ${isEdit ? `<button class="btn danger" id="delV" type="button">Delete</button>` : ""}
+    </div>
+  `);
+  $("#closeM").onclick = closeModal;
+  $("#cancelV").onclick = closeModal;
+
+  $("#saveV").onclick = async ()=>{
+    const __btn = $("#saveV");
+    setBtnBusy(__btn, true);
+    const __hint = showSavingHint("Saving…");
+    try{
+    const added = await filesToDataUrls($("#v_photos").files);
+    v.projectId = $("#v_project").value;
+    v.date = $("#v_date").value;
+    v.status = $("#v_status").value;
+    v.title = $("#v_title").value.trim();
+    v.description = $("#v_desc").value.trim();
+    v.amount = $("#v_amount").value;
+    v.photos = [...(v.photos||[]), ...added];
+    v.updatedAt = new Date().toISOString();
+    if(!v.title) alert("Title required.");
+    if(isEdit){
+      state.variations = alive(state.variations).filter(isAlive).map(x=>x.id===v.id ? v : x);
+    }else{
+      state.variations.unshift(v);
+    }
+    saveState(state);
+    closeModal();
+    render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+    } finally {
+      __hint && __hint.remove();
+      setBtnBusy(__btn, false);
+    }
+
+  };
+
+  $("#delV") && ($("#delV").onclick = ()=>{
+    if(confirmDelete(`variation "${v.title}"`)){
+      state.variations = softDeleteById(state.variations, v.id);
+// NOTE: soft delete handled elsewhere
+
+      saveState(state);
+      closeModal();
+      render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+    }
+  });
+}
+
+// ----------------- Subbies -----------------
+function openSubbieForm(seed=null){
+  const isEdit = !!seed?.id;
+  // Subbies can be shared across projects (projectId = "") or linked to a specific project.
+  const s = isEdit ? seed : {
+    id: uid(),
+    projectId: seed?.projectId || "",
+    name:"", trade:"", phone:"", email:"", notes:"",
+    createdAt:new Date().toISOString(),
+    updatedAt:new Date().toISOString()
+  };
+  const projects = aliveArr(state.projects).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  showModal(`
+    <div class="row space">
+      <h2>${isEdit ? "Edit Subbie" : "Add Subbie"}</h2>
+      <button class="btn" id="closeM" type="button">Close</button>
+    </div>
+    <label>Name</label>
+    <input id="s_name" class="input" value="${escapeHtml(s.name||"")}" placeholder="Company or person" />
+    <label>Trade</label>
+    <input id="s_trade" class="input" value="${escapeHtml(s.trade||"")}" placeholder="e.g., Plumber, Sparky, Gib, Painter" />
+    <label>Project (optional)</label>
+    <select id="s_project" class="input">
+      <option value="" ${!s.projectId?"selected":""}>Shared (all projects)</option>
+      ${projects.map(p=>`<option value="${p.id}" ${p.id===s.projectId?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}
+    </select>
+    <div class="grid two">
+      <div>
+        <label>Phone</label>
+        <input id="s_phone" class="input" value="${escapeHtml(s.phone||"")}" />
+      </div>
+      <div>
+        <label>Email</label>
+        <input id="s_email" class="input" value="${escapeHtml(s.email||"")}" />
+      </div>
+    </div>
+    <label>Notes</label>
+    <textarea id="s_notes" class="input">${escapeHtml(s.notes||"")}</textarea>
+    <hr/>
+    <div class="row space actionsSticky">
+      <button class="btn primary" id="saveS" type="button">${isEdit ? "Save" : "Add"}</button>
+      <button class="btn" id="cancelS" type="button">Cancel</button>
+      ${isEdit ? `<button class="btn danger" id="delS" type="button">Delete</button>` : ""}
+    </div>
+  `);
+  $("#closeM").onclick = closeModal;
+  $("#cancelS").onclick = closeModal;
+
+  $("#saveS").onclick = ()=>{
+    s.name = $("#s_name").value.trim();
+    s.trade = $("#s_trade").value.trim();
+    s.projectId = $("#s_project") ? $("#s_project").value : (s.projectId || "");
+    s.phone = $("#s_phone").value.trim();
+    s.email = $("#s_email").value.trim();
+    s.notes = $("#s_notes").value.trim();
+    s.updatedAt = new Date().toISOString();
+    if(!s.name) alert("Name required.");
+    if(isEdit){
+      state.subbies = alive(state.subbies).filter(isAlive).map(x=>x.id===s.id ? s : x);
+    }else{
+      state.subbies.unshift(s);
+    }
+    saveState(state);
+    closeModal();
+    render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+  };
+
+  $("#delS") && ($("#delS").onclick = ()=>{
+    if(confirmDelete(`subbie "${s.name}"`)){
+      state.subbies = softDeleteById(state.subbies, s.id);
+// NOTE: soft delete handled elsewhere
+
+      state.tasks = alive(state.tasks).filter(isAlive).map(t=> t.assignedSubbieId===s.id ? {...t, assignedSubbieId:null} : t);
+      saveState(state);
+      closeModal();
+      render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+    }
+  });
+}
+
+// ----------------- Deliveries -----------------
+function openDeliveryForm(seed={}){
+  const isEdit = !!seed?.id;
+  const d = isEdit ? seed : {
+    id: uid(),
+    projectId: seed.projectId || (state.projects[0]?.id || ""),
+    supplier: "",
+    date: new Date().toISOString().slice(0,10),
+    status: "Expected",
+    items: "",
+    dropPoint: "",
+    notes: "",
+    photos: [],
+    photosTaken: false,
+    photosJson: "[]",
+    createdAt:new Date().toISOString(),
+    updatedAt:new Date().toISOString()
+  };
+  const projects = aliveArr(state.projects).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  showModal(`
+    <div class="row space">
+      <h2>${isEdit ? "Edit Delivery" : "New Delivery"}</h2>
+      <button class="btn" id="closeM" type="button">Close</button>
+    </div>
+    <label>Project</label>
+    <select id="del_project" class="input">
+      ${projects.map(p=>`<option value="${p.id}" ${p.id===d.projectId?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}
+    </select>
+    <div class="grid two">
+      <div>
+        <label>Supplier</label>
+        <input id="del_supplier" class="input" value="${escapeHtml(d.supplier||"")}" placeholder="PlaceMakers / Carters / Mitre10 / ITM / etc" />
+      </div>
+      <div>
+        <label>Date</label>
+        <input id="del_date" class="input" type="date" value="${escapeHtml(d.date||"")}" />
+      </div>
+    </div>
+    <label>Status</label>
+    <select id="del_status" class="input">
+      ${["Expected","Delivered","Missing/Damaged"].map(s=>`<option ${s===d.status?"selected":""}>${s}</option>`).join("")}
+    </select>
+    <label>Items</label>
+    <textarea id="del_items" class="input" placeholder="What’s coming / what arrived">${escapeHtml(d.items||"")}</textarea>
+    <label>Drop point</label>
+    <input id="del_drop" class="input" value="${escapeHtml(d.dropPoint||"")}" placeholder="Front gate / garage / upstairs / etc" />
+    <label>Notes</label>
+    <textarea id="del_notes" class="input">${escapeHtml(d.notes||"")}</textarea>
+    <label>Photos</label>
+    <input id="del_photos" class="input" type="hidden" accept="image/*" multiple />
+    ${d.photos?.length ? `<div class="thumbgrid">${d.photos.map(ph=>`<div class="thumb"><img src="${ph.dataUrl}" alt="${escapeHtml(ph.name)}"/></div>`).join("")}</div>` : ""}
+    <hr/>
+    <div class="row space actionsSticky">
+      <button class="btn primary" id="saveDel" type="button">${isEdit ? "Save" : "Create"}</button>
+      <button class="btn" id="cancelDel" type="button">Cancel</button>
+      ${isEdit ? `<button class="btn danger" id="delDel" type="button">Delete</button>` : ""}
+    </div>
+  `);
+  $("#closeM").onclick = closeModal;
+  $("#cancelDel").onclick = closeModal;
+
+  $("#saveDel").onclick = async ()=>{
+    const __btn = $("#saveDel");
+    setBtnBusy(__btn, true);
+    const __hint = showSavingHint("Saving…");
+    try{
+    const added = await filesToDataUrls($("#del_photos").files);
+    d.projectId = $("#del_project").value;
+    d.supplier = $("#del_supplier").value.trim();
+    d.date = $("#del_date").value;
+    d.status = $("#del_status").value;
+    d.items = $("#del_items").value.trim();
+    d.dropPoint = $("#del_drop").value.trim();
+    d.notes = $("#del_notes").value.trim();
+d.updatedAt = new Date().toISOString();
+    if(!d.projectId) alert("Project required.");
+    if(isEdit){
+      state.deliveries = alive(state.deliveries).filter(isAlive).map(x=>x.id===d.id ? d : x);
+    }else{
+      state.deliveries.unshift(d);
+    }
+    saveState(state);
+    closeModal();
+    render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+    } finally {
+      __hint && __hint.remove();
+      setBtnBusy(__btn, false);
+    }
+
+  };
+
+  $("#delDel") && ($("#delDel").onclick = ()=>{
+    if(confirmDelete(`delivery "${d.supplier||'delivery'}"`)){
+      state.deliveries = softDeleteById(state.deliveries, d.id);
+// NOTE: soft delete handled elsewhere
+
+      saveState(state);
+      closeModal();
+      render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+    }
+  });
+}
+
+// ----------------- Inspections -----------------
+function openInspectionForm(seed={}){
+  const isEdit = !!seed?.id;
+  const i = isEdit ? seed : {
+    id: uid(),
+    projectId: seed.projectId || (state.projects[0]?.id || ""),
+    type: "Pre-line",
+    date: "",
+    result: "Booked",
+    inspector: "",
+    notes: "",
+    photos: [],
+    photosTaken: false,
+    photosJson: "[]",
+    createdAt:new Date().toISOString(),
+    updatedAt:new Date().toISOString()
+  };
+  const projects = aliveArr(state.projects).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  showModal(`
+    <div class="row space">
+      <h2>${isEdit ? "Edit Inspection" : "New Inspection"}</h2>
+      <button class="btn" id="closeM" type="button">Close</button>
+    </div>
+    <label>Project</label>
+    <select id="i_project" class="input">
+      ${projects.map(p=>`<option value="${p.id}" ${p.id===i.projectId?"selected":""}>${escapeHtml(p.name)}</option>`).join("")}
+    </select>
+    <div class="grid two">
+      <div>
+        <label>Type</label>
+        <select id="i_type" class="input">
+          ${INSPECTION_TYPES_NZ.map(t=>`<option value="${escapeHtml(t)}" ${t===i.type?"selected":""}>${escapeHtml(t)}</option>`).join("")}
+        </select>
+      </div>
+      <div>
+        <label>Date</label>
+        <input id="i_date" class="input" type="date" value="${escapeHtml(i.date||"")}" />
+      </div>
+    </div>
+    <label>Result</label>
+    <select id="i_result" class="input">
+      ${["Booked","Pass","Fail","Conditional"].map(r=>`<option ${r===i.result?"selected":""}>${r}</option>`).join("")}
+    </select>
+    <label>Inspector</label>
+    <input id="i_insp" class="input" value="${escapeHtml(i.inspector||"")}" placeholder="Optional" />
+    <label>Notes</label>
+    <textarea id="i_notes" class="input">${escapeHtml(i.notes||"")}</textarea>
+    <div style="margin-top:10px">
+      <label style="display:flex;align-items:center;gap:10px">
+        <input id="i_photosTaken" type="checkbox" style="transform:scale(1.15)" ${ (i.photosTaken===true || (typeof i.photosJson==="string" && i.photosJson.trim() && i.photosJson.trim()!=="[]")) ? "checked" : "" } />
+        <span>Photos taken</span>
+      </label>
+      <div class="sub">Tick if photos were taken on site (syncs via photosJson).</div>
+    </div>
+    <label>Photos</label>
+    <input id="i_photos" class="input" type="hidden" accept="image/*" multiple />
+    ${i.photos?.length ? `<div class="thumbgrid">${i.photos.map(ph=>`<div class="thumb"><img src="${ph.dataUrl}" alt="${escapeHtml(ph.name)}"/></div>`).join("")}</div>` : ""}
+    <hr/>
+    <div class="row space actionsSticky">
+      <button class="btn primary" id="saveI" type="button">${isEdit ? "Save" : "Create"}</button>
+      <button class="btn" id="cancelI" type="button">Cancel</button>
+      ${isEdit ? `<button class="btn danger" id="delI" type="button">Delete</button>` : ""}
+    </div>
+  `);
+  $("#closeM").onclick = closeModal;
+  $("#cancelI").onclick = closeModal;
+
+  $("#saveI").onclick = async ()=>{
+    const __btn = $("#saveI");
+    setBtnBusy(__btn, true);
+    const __hint = showSavingHint("Saving…");
+    try{
+    const added = await filesToDataUrls($("#i_photos").files);
+    i.projectId = $("#i_project").value;
+    i.type = $("#i_type").value.trim();
+    i.date = $("#i_date").value;
+    i.result = $("#i_result").value;
+    i.inspector = $("#i_insp").value.trim();
+    i.notes = $("#i_notes").value.trim();
+    i.photosTaken = !!$("#i_photosTaken")?.checked;
+    i.photosJson = JSON.stringify(i.photosTaken ? [{taken:true, at:new Date().toISOString()}] : []);
+
+    i.photos = [...(i.photos||[]), ...added];
+    i.updatedAt = new Date().toISOString();
+    if(!i.projectId) alert("Project required.");
+    if(!i.type) alert("Type required.");
+    if(isEdit){
+      state.inspections = alive(state.inspections).filter(isAlive).map(x=>x.id===i.id ? i : x);
+    }else{
+      state.inspections.unshift(i);
+    }
+    saveState(state);
+    closeModal();
+    render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+    } finally {
+      __hint && __hint.remove();
+      setBtnBusy(__btn, false);
+    }
+
+  };
+
+  $("#delI") && ($("#delI").onclick = ()=>{
+    if(confirmDelete(`inspection "${i.type}"`)){
+      state.inspections = softDeleteById(state.inspections, i.id);
+// NOTE: soft delete handled elsewhere
+
+      saveState(state);
+      closeModal();
+      render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+    }
+  });
+}
+
+;
+// ----------------- Reports -----------------
+function openCCCPlanModal(project){
+  const p = projectById(project.id || project);
+  if(!p) return;
+  const current = new Set(Array.isArray(p.cccPlanTypes) ? p.cccPlanTypes : []);
+  const types = cccSortTypes(INSPECTION_TYPES_NZ);
+  showModal(`
+    <div class="modalCard">
+      <div class="row space">
+        <h2>CCC Planning – Applicable Inspections</h2>
+        <button class="btn" id="closeM" type="button">Close</button>
+      </div>
+      <div class="sub">Select inspections that apply to this job. The CCC tracker will show them in recommended order. Scheduling is optional.</div>
+      <hr/>
+      <div class="row space">
+        <button class="btn" id="cccSelectAll" type="button">Select all</button>
+        <button class="btn" id="cccSelectNone" type="button">Clear</button>
+      </div>
+      <div class="list" id="cccTypeList" style="max-height:55vh; overflow:auto; margin-top:10px">
+        ${types.map(t=>`
+          <label class="item" style="display:flex; gap:10px; align-items:center">
+            <input type="checkbox" class="cccTypeChk" value="${escapeHtml(t)}" ${current.has(t)?"checked":""}/>
+            <div style="flex:1">
+              <div class="title">${escapeHtml(t)}</div>
+              <div class="meta">Included in CCC plan</div>
+            </div>
+          </label>
+        `).join("")}
+      </div>
+      <hr/>
+      <div class="row space">
+        <div class="sub"><span id="cccCountLive">${current.size}</span> selected</div>
+        <button class="btn primary" id="cccPlanSave" type="button">Save plan</button>
+      </div>
+    </div>
+  `);
+  $("#closeM").onclick = closeModal;
+
+  function updateCount(){
+    const n = $$(".cccTypeChk").filter(x=>x.checked).length;
+    $("#cccCountLive").textContent = String(n);
+  }
+  $$(".cccTypeChk").forEach(ch=>ch.onchange = updateCount);
+  updateCount();
+
+  $("#cccSelectAll").onclick = ()=>{
+    $$(".cccTypeChk").forEach(ch=>ch.checked = true);
+    updateCount();
+  };
+  $("#cccSelectNone").onclick = ()=>{
+    $$(".cccTypeChk").forEach(ch=>ch.checked = false);
+    updateCount();
+  };
+
+  $("#cccPlanSave").onclick = ()=>{
+    const selected = $$(".cccTypeChk").filter(x=>x.checked).map(x=>x.value);
+    patchProject(p.id, { cccPlanTypes: selected });
+    closeModal();
+    // rerender same project tab
+    navTo("project", { id: p.id, tab: "inspections" });
+    render();
+  };
+}
+
+
+function renderReports(app){
+  setHeader("Reports");
+  const projects = aliveArr(state.projects).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  app.innerHTML = `
+    <div class="card">
+      <div class="row space">
+        <h2>Reports</h2>
+        <div class="row">
+          <button class="btn" id="hnryExport" type="button">Hnry Invoice Export</button>
+          <button class="btn primary" id="runReport" type="button">Run Job Report</button>
+        </div>
+      </div>
+      <div class="grid two">
+        <div>
+          <label>Project</label>
+          <select id="r_project" class="input">
+            <option value="__ALL__">All active sites (Hnry only)</option>
+${projects.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("")}
+          </select>
+        </div>
+        <div></div>
+      </div>
+      <div class="grid two">
+        <div>
+          <label>Date from</label>
+          <input id="r_from" class="input" type="date" value="${new Date(Date.now()-7*86400000).toISOString().slice(0,10)}" />
+        </div>
+        <div>
+          <label>Date to</label>
+          <input id="r_to" class="input" type="date" value="${new Date().toISOString().slice(0,10)}" />
+        </div>
+      </div>
+      <div class="sub">Reports open in a printable preview. Use your browser share/print to save as PDF.</div>
+    </div>
+  `;
+  $("#runReport").onclick = ()=>{
+    const pid = $("#r_project").value;
+    if(pid==="__ALL__"){ alert("Select a specific project for Job Report."); return; }
+    runReportUI(pid, $("#r_from").value, $("#r_to").value);
+  };
+  $("#hnryExport").onclick = ()=>{
+    const pid = $("#r_project").value;
+    runHnryExportUI(pid, $("#r_from").value, $("#r_to").value);
+  };
+
+  // HNRY SIMPLE export binding (override after render)
+  const hnryBtn = document.getElementById("hnryExport");
+  if(hnryBtn){
+    hnryBtn.onclick = () => {
+      runHnryDiaryExportSimple(
+        document.getElementById("r_project").value,
+        document.getElementById("r_from").value,
+        document.getElementById("r_to").value
+      );
+    };
+  }
+}
+
+function runReportUI(projectId, from=null, to=null){
+  const isAll = projectId === "__ALL__";
+  const p = isAll ? null : projectById(projectId);
+  if(!isAll && !p) return;
+  const rangeFrom = from || new Date(Date.now()-7*86400000).toISOString().slice(0,10);
+  const rangeTo = to || new Date().toISOString().slice(0,10);
+
+  const tasks = alive(state.tasks).filter(t=>t.projectId===projectId && isAlive(t));
+  const diary = alive(state.diary).filter(d=>d.projectId===projectId && isAlive(d)).filter(d=>d.date>=rangeFrom && d.date<=rangeTo).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+  const vars = alive(state.variations).filter(v=>v.projectId===projectId && isAlive(v)).filter(v=> (v.date||"")>=rangeFrom && (v.date||"")<=rangeTo);
+  const delivs = alive(state.deliveries).filter(d=>d.projectId===projectId && isAlive(d)).filter(d=> (d.date||"")>=rangeFrom && (d.date||"")<=rangeTo);
+  const insps = alive(state.inspections).filter(i=>i.projectId===projectId && isAlive(i)).filter(i=> (i.date||"")>=rangeFrom && (i.date||"")<=rangeTo);
+
+  const html = `
+    <div class="card printOnly" style="padding:18px">
+      <div style="display:flex; gap:14px; align-items:center">
+        <img src="./logo.png" alt="logo" style="height:44px; width:auto"/>
+        <div>
+          <div style="font-size:18px; font-weight:900">${escapeHtml(settings.companyName)}</div>
+          <div style="color:#333; font-size:12px">${escapeHtml(p.name)} • ${escapeHtml(p.address||"")}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row space">
+        <h2>Job Report</h2>
+        <div class="row noPrint">
+          <button class="btn" id="copyLink" type="button">Copy</button>
+          <button class="btn primary" id="printBtn" type="button">Print / Save PDF</button>
+        </div>
+      </div>
+      <div class="sub">${escapeHtml(p.name)} • ${escapeHtml(p.address||"")}<br/>Period: ${dateFmt(rangeFrom)} → ${dateFmt(rangeTo)}</div>
+      <hr/>
+      <h2>Diary</h2>
+      ${diary.length ? diary.map(d=>`
+        <div class="item">
+          <div class="row space">
+            <div><strong>${dateFmt(d.date)}</strong> ${d.billable?`<span class="badge ok">Billable</span>`:`<span class="badge">Non‑billable</span>`} ${d.hours?`<span class="badge">⏱ ${escapeHtml(String(d.hours))}h</span>`:""}</div>
+            <div class="smallmuted">${escapeHtml(d.category||"")}</div>
+          </div>
+          <div class="meta">${escapeHtml(d.summary||"")}</div>
+        </div>
+      `).join("") : `<div class="sub">No diary entries in range.</div>`}
+
+      <hr/>
+      <h2>Open tasks</h2>
+      ${tasks.filter(t=>t.status!=="Done").length ? `
+        <table>
+          <thead><tr><th>Task</th><th>Status</th><th>Due</th><th>Assigned</th></tr></thead>
+          <tbody>
+            ${tasks.filter(t=>t.status!=="Done").map(t=>{
+              const s = t.assignedSubbieId ? subbieById(t.assignedSubbieId) : null;
+              return `<tr><td>${escapeHtml(t.title)}</td><td>${escapeHtml(t.status||"")}</td><td>${t.dueDate?escapeHtml(dateFmt(t.dueDate)):""}</td><td>${s?escapeHtml(s.name):""}</td></tr>`;
+            }).join("")}
+          </tbody>
+        </table>` : `<div class="sub">No open tasks.</div>`}
+
+      <hr/>
+      <h2>Variations</h2>
+      ${vars.length ? `
+        <table>
+          <thead><tr><th>Title</th><th>Status</th><th>Date</th><th>Amount</th></tr></thead>
+          <tbody>
+            ${vars.map(v=>`<tr><td>${escapeHtml(v.title)}</td><td>${escapeHtml(v.status||"")}</td><td>${v.date?escapeHtml(dateFmt(v.date)):""}</td><td>${v.amount?escapeHtml(money(v.amount)):""}</td></tr>`).join("")}
+          </tbody>
+        </table>` : `<div class="sub">No variations in range.</div>`}
+
+      <hr/>
+      <h2>Deliveries</h2>
+      ${delivs.length ? `
+        <table>
+          <thead><tr><th>Supplier</th><th>Date</th><th>Status</th><th>Items</th></tr></thead>
+          <tbody>
+            ${delivs.map(d=>`<tr><td>${escapeHtml(d.supplier||"")}</td><td>${d.date?escapeHtml(dateFmt(d.date)):""}</td><td>${escapeHtml(d.status||"")}</td><td>${escapeHtml((d.items||"").slice(0,120))}</td></tr>`).join("")}
+          </tbody>
+        </table>` : `<div class="sub">No deliveries in range.</div>`}
+
+      <hr/>
+      <h2>Inspections</h2>
+      ${insps.length ? `
+        <table>
+          <thead><tr><th>Type</th><th>Date</th><th>Result</th><th>Notes</th></tr></thead>
+          <tbody>
+            ${insps.map(i=>`<tr><td>${escapeHtml(i.type||"")}</td><td>${i.date?escapeHtml(dateFmt(i.date)):""}</td><td>${escapeHtml(i.result||"")}</td><td>${escapeHtml((i.notes||"").slice(0,120))}</td></tr>`).join("")}
+          </tbody>
+        </table>` : `<div class="sub">No inspections in range.</div>`}
+
+      <hr/>
+      <div class="smallmuted">Generated ${new Date().toLocaleString("en-NZ")}</div>
+    </div>
+  `;
+
+  // open in same app as modal with print
+  showModal(html);
+  $("#copyLink").onclick = async ()=>{
+    try{
+      await navigator.clipboard.writeText(`Job Report: ${p.name} (${rangeFrom} to ${rangeTo})`);
+      alert("Copied.");
+    }catch(e){ alert("Copy failed."); }
+  };
+  $("#printBtn").onclick = ()=> printModalOnly("Job Report");
+}
+
+
+function runHnryExportUI(projectId, from=null, to=null){
+  const rangeFrom = from || new Date(Date.now()-7*86400000).toISOString().slice(0,10);
+  const rangeTo = to || new Date().toISOString().slice(0,10);
+
+  const isAll = projectId === "__ALL__";
+  const p = isAll ? null : projectById(projectId);
+  if(!isAll && !p) return;
+
+  const diary = aliveArr(state.diary)
+    .filter(d=>d.projectId===projectId && isAlive(d))
+    .filter(d=>d.date>=rangeFrom && d.date<=rangeTo)
+    .filter(d=>d.billable)
+    .sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+
+  const totalBillableHours = diary.reduce((s,d)=> s + Number(d.hours || 0), 0);
+  const labourHours = diary.filter(d=> (d.category||'')==='Labour').reduce((s,d)=> s + Number(d.hours || 0), 0);
+
+
+  // Summarise into line items by category
+  const lines = {};
+  for(const d of diary){
+    const cat = d.category || "Other";
+    if(!lines[cat]) lines[cat] = { hours:0, amount:0, notes:[] };
+    const hrs = Number(d.hours || 0);
+    const rate = d.rate ? Number(d.rate) : (cat==="Labour" ? Number(settings.labourRate||0) : 0);
+    lines[cat].hours += hrs;
+    // amount: if materials/travel etc and no hours, interpret d.rate as amount if provided
+    if(cat==="Labour"){
+      lines[cat].amount += hrs * rate;
+    }else{
+      const amt = d.rate ? Number(d.rate) : 0;
+      lines[cat].amount += amt;
+    }
+    if(d.summary) lines[cat].notes.push(d.summary);
+  }
+
+  const outLines = Object.entries(lines).map(([cat,v])=>{
+    if(cat==="Labour"){
+      return `${settings.companyName} – ${p.name}\n${cat} (${v.hours.toFixed(2)} hrs)    ${money(v.amount)}`;
+    }
+    return `${cat}    ${money(v.amount)}`;
+  });
+
+  
+// Labour: break down hours by day (requested for Hnry)
+const labourByDay = {};
+for(const d of diary){
+  if((d.category||"")!=="Labour") continue;
+  const day = (d.date||"").slice(0,10);
+  if(!labourByDay[day]) labourByDay[day] = { hours:0, amount:0, notes:[] };
+  const hrs = Number(d.hours||0);
+  const rate = d.rate ? Number(d.rate) : Number(settings.labourRate||0);
+  labourByDay[day].hours += hrs;
+  labourByDay[day].amount += hrs * rate;
+  if(d.summary) labourByDay[day].notes.push(d.summary);
+}
+
+const total = Object.values(lines).reduce((s,v)=> s + (v.amount||0), 0);
+
+  const block = [
+    settings.companyName,
+    `Project: ${isAll ? "All active sites" : p.name}`,
+    isAll ? "" : (isAll ? "" : (p.address ? `Address: ${p.address}` : "")),
+    `Period: ${rangeFrom} to ${rangeTo}`,
+    "",
+    ...(Object.keys(labourByDay).length ? ["Labour (hours by day):", ...Object.entries(labourByDay).sort((a,b)=>a[0].localeCompare(b[0])).map(([day,v])=>`  ${day}  ${v.hours.toFixed(2)} hrs    ${money(v.amount)}`), ""] : []),
+    "",
+    ...(Object.keys(labourByDay).length ? ["Labour (hours by day):", ...Object.entries(labourByDay).sort((a,b)=>a[0].localeCompare(b[0])).map(([day,v])=>`  ${day}  ${v.hours.toFixed(2)} hrs    ${money(v.amount)}`), ""] : []),
+    "",
+    ...Object.entries(lines).map(([cat,v])=>{
+      if(cat==="Labour") return `Site labour – ${isAll ? "All sites" : p.name} (see daily breakdown below)    ${money(v.amount)}`;
+      return `${cat}    ${money(v.amount)}`;
+    }),
+    "",
+    `Total billable hours:    ${totalBillableHours.toFixed(2)} h`,
+    `Labour hours:    ${labourHours.toFixed(2)} h`,
+    `Total (ex GST):    ${money(total)}`
+  ].filter(Boolean).join("\n");
+
+  showModal(`
+    <div class="row space">
+      <h2>Hnry Invoice Export</h2>
+      <div class="row">
+        <button class="btn" id="copyH" type="button">Copy</button>
+        <button class="btn" id="closeM" type="button">Close</button>
+      </div>
+    </div>
+    <div class="sub">Copy/paste into Hnry invoice line items. Uses billable diary entries only.</div>
+    <hr/>
+    <textarea class="input" id="hnryBlock" style="min-height:260px">${escapeHtml(block)}</textarea>
+    <div class="smallmuted">Billable hours: <strong>${totalBillableHours.toFixed(2)}h</strong> (Labour: ${labourHours.toFixed(2)}h). Tip: set your default labour rate in Settings.</div>
+  `);
+  $("#closeM").onclick = closeModal;
+  $("#copyH").onclick = async ()=>{
+    try{
+      await navigator.clipboard.writeText(block);
+      alert("Copied.");
+    }catch(e){
+      alert("Copy failed.");
+    }
+  };
+}
+
+// ----------------- Settings -----------------
+function renderSettings(app){
+  setHeader("Settings");
+  updateAppUpdateStamp();
+
+  app.innerHTML = `
+      <div class="card" style="margin-top:12px">
+        <div class="row space">
+          <h3>App refresh</h3>
+          <span class="sub">If updates don’t come through, use this to force the newest GitHub build.</span>
+        </div>
+        <div class="row" style="gap:10px; flex-wrap:wrap">
+        <select class="input" id="projStageFilter" style="min-width:180px">
+          <option value="">All stages</option>
+          ${PROJECT_STAGES.map(s=>`<option value="${s}">${s}</option>`).join("")}
+        </select>
+          <button class="btn" id="btnCheckUpdate" type="button">Check for update</button>
+          <button class="btn danger" id="btnForceRefresh" type="button">Force refresh (update)</button>
+        </div>
+        <div class="smallmuted" style="margin-top:8px">
+          Force refresh clears the PWA cache & service worker but keeps your local data (IndexedDB).
+        </div>
+        <div class="sub" id="appUpdateStamp" style="margin-top:8px">Last app update: —</div>
+      </div>
+
+    <div class="grid two">
+      
+
+      <div class="card">
+        <h2>Appearance</h2>
+        <label>Theme</label>
+        <select id="set_theme" class="input">
+          <option value="dark" ${settings.theme==="dark"?"selected":""}>Dark (default)</option>
+          <option value="light" ${settings.theme==="light"?"selected":""}>Light</option>
+        </select>
+        <hr/>
+        <h2>Business</h2>
+        <label>Company name</label>
+        <input id="set_company" class="input" value="${escapeHtml(settings.companyName||"")}" />
+        <label>Default labour rate (NZD/hr)</label>
+        <input id="set_rate" class="input" type="number" step="0.01" value="${escapeHtml(String(settings.labourRate||""))}" />
+        <div class="smallmuted">Logo is loaded from the root file: <strong>./logo.png</strong></div>
+        <hr/>
+        <button class="btn primary" id="saveSettings" type="button">Save settings</button>
+      </div>
+      <div class="card">
+        <h2>Data</h2>
+        <div class="sub">
+          This app stores everything locally on your device (IndexedDB).<br/>
+          Use Export/Import for backups or moving phones.
+        </div>
+        <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:10px">
+          <button class="btn" id="exportBtn" type="button">Export</button>
+          <button class="btn" id="importBtn" type="button">Import</button>
+        </div>
+        <hr/>
+        <button class="btn danger" id="wipeBtn" type="button">Wipe all data</button>
+      </div>
+
+      <div class="card">
+        <h2>Worker profiles</h2>
+        <div class="sub">Enable Worker mode to restrict what each profile can access and which forms they can edit.</div>
+
+        <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:10px">
+          <label class="row" style="gap:8px; align-items:center">
+            <input type="checkbox" id="wm_enabled" ${settings.workerMode?.enabled ? "checked":""} />
+            <span>Worker mode</span>
+          </label>
+          <label class="row" style="gap:8px; align-items:center">
+            <input type="checkbox" id="wm_requirePin" ${settings.workerMode?.requirePin ? "checked":""} />
+            <span>Require PIN (if set)</span>
+          </label>
+        </div>
+
+        <div class="row space" style="margin-top:12px">
+          <div class="h">Profiles</div>
+          <button class="btn" id="wm_add" type="button">Add worker</button>
+        </div>
+
+        <div class="list" id="wm_list" style="margin-top:10px"></div>
+        <div class="smallmuted" style="margin-top:8px">Tip: keep an Admin profile so you can always access Settings.</div>
+      </div>
+
+      <hr/>
+      <div class="h">Deleted Jobs</div>
+      <div id="deletedProjects" class="list" style="margin-top:8px"></div>
+</div>
+  `;
+
+  $("#saveSettings").onclick = ()=>{
+    settings.theme = $("#set_theme").value;
+    settings.companyName = $("#set_company").value.trim() || "Matty Campbell Building";
+    settings.labourRate = Number($("#set_rate").value || 0);
+    saveSettings(settings);
+    applyTheme();
+    alert("Saved.");
+  };
+  $("#wipeBtn").onclick = ()=>{
+    if(confirm("Wipe ALL app data? This can't be undone.")){
+      state = defaults();
+      saveState(state);
+      alert("Wiped.");
+      navTo("projects");
+    }
+  };
+
+  // Settings page: bind Export/Import buttons
+  try{ bindImportExportButtons(); }catch(e){}
+  try{ bindWorkerSettingsUI(); }catch(e){}
+  setTimeout(()=>{ try{ renderDeletedProjectsUI(); }catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+ }, 0);
+
+  // Settings: update helpers
+  const _bfu = document.getElementById("btnForceRefresh");
+  if(_bfu) _bfu.onclick = ()=>forceRefreshApp();
+  const _bcu = document.getElementById("btnCheckUpdate");
+  if(_bcu) _bcu.onclick = async ()=>{ await checkForUpdate(); alert("Checked for update. If one is available, reload the app."); };
+}
+
+
+// ----------------- Demo data -----------------
+function loadDemo(){
+  if(alive(state.projects).length) {
+    if(!confirm("Load demo data (this will add demo records). Continue?")) return;
+  }
+  const pid = uid();
+  state.projects.unshift({
+    id: pid,
+    name: "14 Kowhai Road Renovation",
+    address: "14 Kowhai Road, Auckland, New Zealand",
+    clientName: "Client Example",
+    clientPhone: "0210000000",
+    notes: "Gate code 1234. Watch the dog. Power in garage.",
+    lat: -36.8485,
+    lng: 174.7633,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+  const sid = uid();
+  state.subbies.unshift({ id:sid, name:"Sparkies Ltd", trade:"Electrician", phone:"0211111111", email:"spark@example.com", notes:"Prefers Fridays", createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
+  state.tasks.unshift({ id:uid(), projectId:pid, title:"Book pre-line inspection", details:"Call council", status:"To do", dueDate:new Date(Date.now()+3*86400000).toISOString().slice(0,10), assignedSubbieId:null, photos: [],
+    photosTaken: false,
+    photosJson: "[]", createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
+  state.diary.unshift({ id:uid(), projectId:pid, date:new Date().toISOString().slice(0,10), summary:"Framing progress in lounge + checked bracing fixings.", hours:"7.5", billable:true, category:"Labour", rate:"", photos: [],
+    photosTaken: false,
+    photosJson: "[]", createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
+  state.variations.unshift({ id:uid(), projectId:pid, date:new Date().toISOString().slice(0,10), title:"Extra LVL beam", description:"Client requested opening widening; requires LVL + extra labour.", amount:"480", status:"Sent", photos: [],
+    photosTaken: false,
+    photosJson: "[]", createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
+  state.deliveries.unshift({ id:uid(), projectId:pid, supplier:"PlaceMakers", date:new Date().toISOString().slice(0,10), status:"Expected", items:"Timber pack + fixings", dropPoint:"Driveway", notes:"Call ahead", photos: [],
+    photosTaken: false,
+    photosJson: "[]", createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
+  state.inspections.unshift({ id:uid(), projectId:pid, type:"Pre-line", date:new Date(Date.now()+2*86400000).toISOString().slice(0,10), result:"Booked", inspector:"", notes:"Ensure smoke alarms locations confirmed", photos: [],
+    photosTaken: false,
+    photosJson: "[]", createdAt:new Date().toISOString(), updatedAt:new Date().toISOString() });
+  saveState(state);
+  render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+}
+
+
+
+
+
+
+
+/* ===== SUBBIES PROJECTID MIGRATION ===== */
+(function normalizeSubbiesProjectId(){
+  // Ensure the field exists so sync can round-trip it.
+  // We do NOT guess projectId for older subbies because they were historically shared.
+  if(!state || !Array.isArray(state.subbies)) return;
+  let changed = false;
+  state.subbies = alive(state.subbies).filter(isAlive).map(s => {
+    if(s && typeof s.projectId === "undefined"){
+      changed = true;
+      return { ...s, projectId: "" };
+    }
+    return s;
+  });
+  if(changed) saveState(state);
+})();
+/* ===== END SUBBIES PROJECTID MIGRATION ===== */
+
+
+
+
+// ===== PHASE A: PIPELINE (Leads) =====
+function leadCard(l){
+  const name = escapeHtml(l.clientName || "Unnamed lead");
+  const addr = escapeHtml(l.address || "No address");
+  const status = escapeHtml(l.status || "New");
+  const jobType = l.jobType ? ` • ${escapeHtml(l.jobType)}` : "";
+  return `
+    <div class="item" data-id="${l.id}">
+      <div class="row space">
+        <div>
+          <div class="title">${name}</div>
+          <div class="meta">${addr}</div>
+          <div class="meta">${status}${jobType}</div>
+        </div>
+        <div class="row">
+          <button class="btn small" data-action="open" data-id="${l.id}" type="button">Open</button>
+          <button class="btn small" data-action="edit" data-id="${l.id}" type="button">Edit</button>
+        </div>
+      </div>
+    </div>
+  
+    <div class="card" style="margin-top:12px">
+      <div class="row space" style="align-items:center; gap:10px; flex-wrap:wrap">
+        <div>
+          <div class="h3">Company modules</div>
+          <div class="sub">Access company-wide registers.</div>
+        </div>
+        <div class="row" style="gap:10px">
+          <button class="btn" id="btnOpenEquipment" type="button">Open Equipment & Fleet</button>
+        </div>
+      </div>
+    </div>
+`;
+}
+
+function renderPreconItemRow(item, idx){
+  const id = `precon_${item.key}`;
+  const checked = item.done ? "checked" : "";
+  const choice = item.kind === "choice"
+    ? `<select class="input" data-precon-choice="${idx}" style="min-height:44px">
+        ${item.choices.map(c=>`<option value="${escapeAttr(c)}" ${c===item.value?"selected":""}>${escapeAttr(c)}</option>`).join("")}
+       </select>`
+    : "";
+  return `
+    <div class="listItem" style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px; margin-bottom:10px">
+      <label style="display:flex; align-items:center; gap:10px; flex:1; cursor:pointer">
+        <input type="checkbox" data-precon-check="${idx}" ${checked} style="transform:scale(1.1)"/>
+        <div style="display:flex; flex-direction:column; gap:4px">
+          <div style="font-weight:700">${escapeAttr(item.label)}</div>
+          ${item.kind==="choice" ? `<div class="smallmuted">Answer: <span style="opacity:.9">${escapeAttr(item.value||"Unknown")}</span></div>` : ""}
+        </div>
+      </label>
+      ${choice}
+    </div>
+  `;
+}
+
+function bindLeadPrecon(lead){
+  const host = document.getElementById("preconList");
+  const badge = document.getElementById("preconProgressBadge");
+  if(!host || !badge) return;
+
+  let list = preconChecklistFromLead(lead);
+  // template selector
+  const sel = document.getElementById("preconTemplateSelect");
+  const btnTpl = document.getElementById("preconApplyTemplate");
+  const preconLocked = leadIsConverted(lead);
+  const lockNote = document.getElementById("preconLockedNote");
+  if(lockNote) lockNote.style.display = preconLocked ? "" : "none";
+
+  if(preconLocked){
+    if(sel) sel.disabled = true;
+    if(btnTpl) btnTpl.disabled = true;
+  }
+
+  if(sel){
+    // default selection from lead job type, but don't overwrite user choice
+    sel.value = lead.preconTemplateKey || getLeadJobTypeKey(lead) || "standard_nz";
+  }
+  if(btnTpl && sel){
+    btnTpl.onclick = ()=>{
+      const key = sel.value || "standard_nz";
+      if(!confirm("Apply this template? This will replace the current checklist for this lead.")) return;
+      list = applyPreconTemplateToLead(lead, key);
+      refresh();
+    };
+  }
+
+
+  const refresh = ()=>{
+    host.innerHTML = list.map((it, i)=>renderPreconItemRow(it, i)).join("");
+    const prog = preconProgress(list);
+    badge.textContent = `${prog.done}/${prog.total} (${prog.pct}%)`;
+    // bind
+    
+    if(preconLocked){
+      host.querySelectorAll("input,select,button").forEach(el=>{ 
+        if(el.id==="preconMarkAll" || el.id==="preconReset") return;
+      });
+      host.querySelectorAll("[data-precon-check],[data-precon-choice]").forEach(el=>{ el.disabled = true; });
+    }
+host.querySelectorAll("[data-precon-check]").forEach(el=>{
+      el.onchange = ()=>{
+        const i = Number(el.getAttribute("data-precon-check"));
+        list[i].done = !!el.checked;
+        save();
+        refresh();
+      };
+    });
+    host.querySelectorAll("[data-precon-choice]").forEach(el=>{
+      el.onchange = ()=>{
+        const i = Number(el.getAttribute("data-precon-choice"));
+        list[i].value = el.value;
+        // if user answers, consider it done when not Unknown
+        if(list[i].kind==="choice") list[i].done = (el.value !== "Unknown");
+        save();
+        refresh();
+      };
+    });
+  };
+
+  const save = ()=>{
+    try{
+      // persist back onto lead record (local-only lead store)
+      lead.preconChecklistJson = JSON.stringify(list);
+      if(typeof saveLead==='function'){ saveLead(lead); } else if(typeof updateLead==='function'){ updateLead(lead); }
+    }catch(e){
+      console.warn("precon save failed", e);
+    }
+  };
+
+  const markAll = document.getElementById("preconMarkAll");
+  if(preconLocked){ if(markAll) markAll.disabled=true; }
+
+  if(markAll) markAll.onclick = ()=>{
+    list = list.map(it=>{
+      const c = {...it};
+      c.done = true;
+      if(c.kind==="choice" && (!c.value || c.value==="Unknown")) c.value = "Yes";
+      return c;
+    });
+    save(); refresh();
+  };
+
+  const reset = document.getElementById("preconReset");
+  if(preconLocked){ if(reset) reset.disabled=true; }
+
+  if(reset) reset.onclick = ()=>{
+    list = defaultPreconChecklist();
+    save(); refresh();
+  };
+
+  refresh();
+}
+
+function renderPipeline(app){
+  setHeader("Pipeline");
+  const leads = aliveArr(state.leads).slice().sort((a,b)=> (b.updatedAt||"").localeCompare(a.updatedAt||""));
+  app.innerHTML = `
+    <div class="card">
+      <div class="row space">
+        <h2>Leads</h2>
+        <button class="btn primary" id="newLead" type="button">New Lead</button>
+      </div>
+      <div class="sub">Track enquiries from first contact through to quote and conversion. Leads are local-only for now (sync later).</div>
+      <hr/>
+      <div class="row" style="gap:10px;flex-wrap:wrap">
+        <select class="input" id="leadStatusFilter" style="min-width:200px">
+          <option value="">All statuses</option>
+          ${LEAD_STATUSES.map(s=>`<option value="${s}">${s}</option>`).join("")}
+        </select>
+        <input class="input" id="leadSearch" placeholder="Search leads (name / address)" style="flex:1;min-width:220px"/>
+      </div>
+      <div class="list" id="leadList">
+        ${leads.length ? leads.map(l=>leadCard(l)).join("") : `<div class="sub">No leads yet. Add your first enquiry.</div>`}
+      </div>
+    </div>
+  `;
+  $("#newLead").onclick = ()=> openLeadForm({});
+  const renderList = (arr)=>{
+    const el=$("#leadList"); if(!el) return;
+    el.innerHTML = arr.length ? arr.map(l=>leadCard(l)).join("") : `<div class="sub">No leads match your filter.</div>`;
+  };
+  const apply = ()=>{
+    const st = $("#leadStatusFilter")?.value || "";
+    const q = ($("#leadSearch")?.value || "").toLowerCase().trim();
+    const all = aliveArr(state.leads).slice().sort((a,b)=> (b.updatedAt||"").localeCompare(a.updatedAt||""));
+    const filtered = all.filter(l=>{
+      const hitsSt = !st || (l.status||"New")===st;
+      const hitsQ = !q || ((l.clientName||"").toLowerCase().includes(q) || (l.address||"").toLowerCase().includes(q));
+      return hitsSt && hitsQ;
+    });
+    renderList(filtered);
+  };
+  if($("#leadStatusFilter")) $("#leadStatusFilter").onchange = apply;
+  if($("#leadSearch")) $("#leadSearch").oninput = apply;
+
+  // delegated actions
+  $("#leadList").onclick = (e)=>{
+    const btn = e.target.closest("button");
+    if(!btn) return;
+    const id = btn.dataset.id;
+    if(btn.dataset.action==="open") return navTo("lead",{id});
+    if(btn.dataset.action==="edit"){
+      const l = state.leads.find(x=>x && x.id===id);
+      if(l) openLeadForm(l);
+    }
+  };
+}
+
+function renderLeadDetail(app, params){
+  const id = params.id;
+  const l = (state.leads||[]).find(x=>x && x.id===id);
+  if(!l){ app.innerHTML = `<div class="card"><div class="sub">Lead not found.</div></div>`; return; }
+  app.innerHTML = `
+    <div class="card">
+      <div class="row space">
+        <div>
+          <h2>${escapeHtml(l.clientName||"Unnamed lead")}</h2>
+          <div class="sub">${escapeHtml(l.status||"New")}</div>
+        </div>
+        <div class="row" style="gap:10px;flex-wrap:wrap">
+          <button class="btn" id="editLead" type="button">Edit</button>
+          <button class="btn primary" id="convertLead" type="button">Convert to job</button>
+          <button class="btn danger" id="deleteLead" type="button">Delete</button>
+        </div>
+      </div>
+      <hr/>
+
+      <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:12px">
+        <button class="btn" id="tabLeadOverview" type="button">Overview</button>
+        <button class="btn" id="tabLeadPrecon" type="button">Precon</button>
+      </div>
+      <div id="leadOverview" style="margin-top:12px">
+      <div class="grid two">
+        <div>
+          <div class="label">Address</div>
+          <div class="meta">${escapeHtml(l.address||"—")}</div>
+          <div style="height:8px"></div>
+          <div class="label">Contact</div>
+          <div class="meta">${escapeHtml(l.phone||"")}${l.email ? ` • ${escapeHtml(l.email)}`:""}</div>
+          <div style="height:8px"></div>
+          <div class="label">Lead source</div>
+          <div class="meta">${escapeHtml(l.leadSource||"—")}</div>
+          <div style="height:8px"></div>
+          <div class="label">Job type</div>
+          <div class="meta">${escapeHtml(l.jobType||"—")}</div>
+          <div style="height:8px"></div>
+          <div class="label">Budget</div>
+          <div class="meta">${escapeHtml(l.budget||"—")}</div>
+        </div>
+        <div>
+          <div class="label">Notes</div>
+          <div class="meta" style="white-space:pre-wrap">${escapeHtml(l.notes||"")}</div>
+          <div style="height:8px"></div>
+          <div class="label">Photos taken</div>
+          <div class="meta">${(l.photosTaken||photosTakenFromJson(l.photosJson)) ? "Yes" : "No"}</div>
+        </div>
+      </div>
+    </div>
+  
+      </div>
+
+      <div class="card" id="preconCard" style="display:none;margin-top:12px">
+        <div class="row space">
+          <h3>Preconstruction checklist</h3>
+          <span class="badge" id="preconProgressBadge">0/0</span>
+        </div>
+        <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:12px">
+          <select class="input" id="preconTemplateSelect" style="flex:1; min-width:220px">
+            <option value="standard_nz">Standard NZ Residential</option>
+            <option value="new_build">New Build</option>
+            <option value="renovation">Renovation / Alteration</option>
+            <option value="extension">Extension / Addition</option>
+            <option value="bathroom">Bathroom / Wet Area</option>
+            <option value="deck">Deck / External</option>
+            <option value="re_roof">Re-roof / Roofing</option>
+          </select>
+          <button class="btn" type="button" id="preconApplyTemplate">Apply template</button>
+        </div>
+
+        <div class="sub" style="margin-top:6px">NZ residential preconstruction checklist (editable per lead).</div>
+        <div class="smallmuted" id="preconLockedNote" style="margin-top:6px; display:none">Precon is locked after conversion.</div>
+
+        <div style="margin-top:12px" id="preconList"></div>
+        <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:12px">
+          <button class="btn" type="button" id="preconMarkAll">Mark all complete</button>
+          <button class="btn ghost" type="button" id="preconReset">Reset</button>
+        </div>
+        <div class="smallmuted" style="margin-top:8px">This is stored inside the lead as <code>preconChecklistJson</code> (local-only for now).</div>
+      </div>
+`;
+  $("#editLead").onclick = ()=> openLeadForm(l);
+  $("#deleteLead").onclick = ()=>{
+    if(!confirm("Delete this lead?")) return;
+    state.leads = softDeleteById(state.leads, l.id);
+    saveState(state);
+    navTo("pipeline");
+  };
+  $("#convertLead").onclick = ()=> convertLeadToProject(l.id);
+  try{ bindLeadPrecon(l); }catch(e){ console.warn(e); }
+  try{ setLeadTab2(window.__mcbLeadTab || 'overview'); }catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+
+}
+
+function openLeadForm(seed={}){
+  const isEdit = !!seed.id;
+  const l = isEdit ? seed : {
+    id: uid(),
+    status: "New",
+    clientName: "",
+    phone: "",
+    email: "",
+    address: "",
+    leadSource: "",
+    jobType: "",
+    budget: "",
+    notes: "",
+    photosTaken: false,
+    photosJson: "[]",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    deletedAt: null
+  };
+  showModal(`
+    <div class="row space">
+      <h2>${isEdit ? "Edit Lead" : "New Lead"}</h2>
+      <button class="btn" id="closeLeadModal" type="button">Close</button>
+    </div>
+    <hr/>
+    <label class="label">Status</label>
+    <select class="input" id="leadStatus">
+      ${LEAD_STATUSES.map(s=>`<option value="${s}" ${l.status===s?"selected":""}>${s}</option>`).join("")}
+    </select>
+
+    <label class="label">Client name</label>
+    <input class="input" id="leadClientName" value="${escapeAttr(l.clientName||"")}" />
+
+    <div class="grid two">
+      <div>
+        <label class="label">Phone</label>
+        <input class="input" id="leadPhone" value="${escapeAttr(l.phone||"")}" />
+      </div>
+      <div>
+        <label class="label">Email</label>
+        <input class="input" id="leadEmail" value="${escapeAttr(l.email||"")}" />
+      </div>
+    </div>
+
+    <label class="label">Address</label>
+    <input class="input" id="leadAddress" value="${escapeAttr(l.address||"")}" placeholder="Site address" />
+
+    <div class="grid two">
+      <div>
+        <label class="label">Lead source</label>
+        <input class="input" id="leadSource" value="${escapeAttr(l.leadSource||"")}" placeholder="Referral, Website, etc." />
+      </div>
+      <div>
+        <label class="label">Job type</label>
+        <input class="input" id="leadJobType" value="${escapeAttr(l.jobType||"")}" placeholder="Renovation, deck, new build…" />
+      </div>
+    </div>
+
+    <label class="label">Budget (optional)</label>
+    <input class="input" id="leadBudget" value="${escapeAttr(l.budget||"")}" placeholder="$" />
+
+    <label class="label">Notes</label>
+    <textarea class="input" id="leadNotes" rows="4">${escapeHtml(l.notes||"")}</textarea>
+
+    <div class="row" style="gap:10px; align-items:center; margin-top:10px">
+      <input type="checkbox" id="leadPhotosTaken" ${ (l.photosTaken||photosTakenFromJson(l.photosJson)) ? "checked":"" } />
+      <label for="leadPhotosTaken" class="label" style="margin:0">Photos taken</label>
+    </div>
+
+    <div class="row" style="gap:10px; margin-top:14px; justify-content:flex-end">
+      <button class="btn" id="cancelLead" type="button">Cancel</button>
+      <button class="btn primary" id="saveLead" type="button">${isEdit ? "Save" : "Create"}</button>
+    </div>
+  `);
+  $("#closeLeadModal").onclick = closeModal;
+  $("#cancelLead").onclick = closeModal;
+  $("#saveLead").onclick = ()=>{
+    const now = new Date().toISOString();
+    const upd = {
+      ...l,
+      status: $("#leadStatus").value,
+      clientName: $("#leadClientName").value.trim(),
+      phone: $("#leadPhone").value.trim(),
+      email: $("#leadEmail").value.trim(),
+      address: $("#leadAddress").value.trim(),
+      leadSource: $("#leadSource").value.trim(),
+      jobType: $("#leadJobType").value.trim(),
+      budget: $("#leadBudget").value.trim(),
+      notes: $("#leadNotes").value,
+      photosTaken: !!$("#leadPhotosTaken").checked,
+      photosJson: ($("#leadPhotosTaken").checked ? "true" : "[]"),
+      updatedAt: now
+    };
+    if(!upd.clientName && !upd.address){
+      alert("Please enter at least a client name or an address.");
+      return;
+    }
+    if(isEdit){
+      state.leads = (state.leads||[]).map(x=> x && x.id===upd.id ? upd : x);
+    } else {
+      state.leads = [...(state.leads||[]), upd];
+    }
+    saveState(state);
+    closeModal();
+    // stay on pipeline
+    if(location.hash.startsWith("#lead")) navTo("lead",{id: upd.id});
+    else render();
+  };
+}
+
+function convertLeadToProject(leadId){
+  const lead = (state.leads||[]).find(x=>x && x.id===leadId);
+  if(!lead) return;
+  if(!confirm("Convert this lead into a job (project)?")) return;
+  const now = new Date().toISOString();
+  const projId = uid();
+  const project = {
+    id: projId,
+    name: (lead.clientName ? `${lead.clientName} - ${lead.jobType||"Job"}` : (lead.jobType||"New Job")).trim(),
+    address: lead.address || "",
+    clientName: lead.clientName || "",
+    clientPhone: lead.phone || "",
+    notes: lead.notes || "",
+    lat: null, lng: null,
+    stage: "Precon",
+    leadId: lead.id,
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null
+  };
+  state.projects = [...(state.projects||[]), project];
+  state.leads = (state.leads||[]).map(x=> x && x.id===lead.id ? ({...x, status:"Converted", projectId: projId, updatedAt: now}) : x);
+  saveState(state);
+  closeModal();
+  navTo("project",{id: projId});
+}
+// ===== /PHASE A =====
+
+
+// ===== SOFT DELETE (sync-safe) =====
+function softDeleteById(arr, id){
+  const now = new Date().toISOString();
+  try{ if(typeof window.render==='function'){ setTimeout(()=>window.render(),0); } }catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+  return (arr||[]).map(item => {
+    if(item && item.id === id){
+      return { ...item, deletedAt: now, updatedAt: now };
+    }
+    return item;
+  });
+}
+function softDeleteWhere(arr, predicate){
+  const now = new Date().toISOString();
+  return (arr||[]).map(item => {
+    if(item && predicate(item)){
+      return { ...item, deletedAt: now, updatedAt: now };
+    }
+    return item;
+  });
+}
+function isAlive(x){ return x && !x.deletedAt; }
+function aliveArr(arr){ return (arr||[]).filter(isAlive); }
+
+function alive(arr){ return (arr||[]).filter(isAlive); }
+
+function projectsActive(){
+  // Active = not deleted. Sorted A→Z for selects.
+  return aliveArr(state.projects).slice().sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+}
+
+
+
+
+/* ===== PHASE1_PHOTOS_CHECKBOX ===== */
+function photosFlagFromCheckbox(id){
+  const el=document.getElementById(id);
+  return el && el.checked ? "true" : "";
+}
+
+/* ===== PHASE1_UNDELETE ===== */
+function renderDeletedProjectsUI(){
+  const box=document.getElementById("deletedProjects");
+  if(!box) return;
+  const deleted=(state.projects||[]).filter(p=>p.deletedAt);
+  box.innerHTML = deleted.length ? deleted.map(p=>`
+    <div class="row">
+      <strong>${p.name||p.address||"Site"}</strong>
+      <button onclick="restoreProject('${p.id}')">Restore</button>
+    </div>
+  `).join("") : "<em>No deleted sites</em>";
+}
+function restoreProject(id){
+  const now=new Date().toISOString();
+  state.projects=state.projects.map(p=>p.id===id?{...p,deletedAt:null,updatedAt:now}:p);
+  saveState(state); render(); try{renderDeletedProjectsUI();}catch(e){}
+    try{
+      const lu = document.getElementById('lastUpdateStamp');
+      if(lu) lu.textContent = getLastUpdateStamp();
+    }catch(e){}
+
+}
+
+/* ===== PHASE1_TASK_FILTERS ===== */
+let taskFilterSite="all", taskFilterStatus="all";
+function filteredTasks(){
+  return (state.tasks||[])
+    .filter(t=>!t.deletedAt)
+    .filter(t=>taskFilterSite==="all"||t.projectId===taskFilterSite)
+    .filter(t=>taskFilterStatus==="all"||t.status===taskFilterStatus);
+}
+
+// ===== FORCE_PHOTOS_LABEL =====
+function injectPhotosLabel(){
+  document.querySelectorAll('input[type="checkbox"][data-photos]').forEach(cb=>{
+    if(!cb.parentElement.querySelector('.photos-taken-label')){
+      const span=document.createElement('span');
+      span.className='photos-taken-label';
+      span.innerHTML='Photos taken';
+      cb.after(span);
+    }
+  });
+}
+// call after every render
+const _render = render;
+render = function(){
+  _render();
+  injectPhotosLabel();
+};
+
+
+// ===== PHASE 2: Print modal only (no page behind) =====
+function printModalOnly(title="Report"){
+  const modal = document.getElementById("modal");
+  if(!modal) { window.print(); return; }
+  const content = modal.innerHTML || "";
+  const w = window.open("", "_blank");
+  if(!w){ alert("Pop-up blocked. Allow pop-ups to print."); return; }
+  const css = `
+    <style>
+      body{font-family:system-ui,-apple-system,BlinkMacSystemFont; padding:18px;}
+      img{max-width:220px;height:auto}
+      table{width:100%;border-collapse:collapse;margin-top:10px}
+      th,td{border:1px solid #ddd;padding:6px;font-size:12px;vertical-align:top}
+      th{background:#f5f5f5}
+      button{display:none !important}
+      .btn{display:none !important}
+      .noPrint{display:none !important}
+      .card{box-shadow:none !important;border:0 !important}
+      @page{margin:12mm}
+    </style>`;
+  w.document.open();
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>${title}</title>${css}</head><body>${content}</body></html>`);
+  w.document.close();
+  w.focus();
+  // Give images time to load (logo)
+  setTimeout(()=>{ w.print(); }, 400);
+}
+// ===== END PHASE 2 =====
+
+
+
+// ===== HNRY SIMPLE DIARY EXPORT (ACTIVE JOBS ONLY) =====
+function formatDateNZ(iso){
+  if(!iso) return "";
+  const [y,m,d] = iso.slice(0,10).split("-");
+  return `${d}/${m}/${y}`;
+}
+
+function runHnryDiaryExportSimple(projectId, from, to){
+  const rangeFrom = from || new Date(Date.now()-7*86400000).toISOString().slice(0,10);
+  const rangeTo   = to   || new Date().toISOString().slice(0,10);
+
+  const activeProjects = aliveArr(state.projects).filter(p=>!p.deletedAt);
+  const activeIds = activeProjects.map(p=>p.id);
+
+  const diary = aliveArr(state.diary)
+    .filter(d=>!d.deletedAt)
+    .filter(d=>Number(d.hours||0)>0)
+    .filter(d=>(d.date||"")>=rangeFrom && (d.date||"")<=rangeTo)
+    .filter(d=> projectId==="__ALL__" ? activeIds.includes(d.projectId) : d.projectId===projectId)
+    .sort((a,b)=>(a.date||"").localeCompare(b.date||""));
+
+  const byDate = {};
+  for(const d of diary){
+    const day = (d.date||"").slice(0,10);
+    if(!byDate[day]) byDate[day]=[];
+    byDate[day].push(d);
+  }
+
+  let grandTotal = 0;
+  const lines = [];
+  lines.push("HNRY DIARY EXPORT");
+  lines.push(`Period: ${rangeFrom} to ${rangeTo}`);
+  lines.push("");
+
+  Object.keys(byDate).sort().forEach(day=>{
+    lines.push(formatDateNZ(day));
+    let dailyTotal = 0;
+    for(const d of byDate[day]){
+      const proj = activeProjects.find(p=>p.id===d.projectId);
+      if(!proj) continue;
+      const hrs = Number(d.hours||0);
+      dailyTotal += hrs;
+      lines.push(`  ${proj.name} - ${hrs.toFixed(2)} hrs`);
+    }
+    lines.push(`  Daily total: ${dailyTotal.toFixed(2)} hrs`);
+    lines.push("");
+    grandTotal += dailyTotal;
+  });
+
+  lines.push("--------------------------------");
+  lines.push(`TOTAL HOURS: ${grandTotal.toFixed(2)}`);
+
+  const out = lines.join("\n");
+
+  showModal(
+    '<pre style="white-space:pre-wrap;font-size:13px">' + out + '</pre>' +
+    '<button class="btn" id="copyH">Copy to clipboard</button>'
+  );
+  const c = document.getElementById("copyH");
+  if(c){
+    c.onclick = ()=>{
+      navigator.clipboard.writeText(out);
+      toast("Copied");
+    };
+  }
+}
+
+
+
 function toastSuccess(msg){ toast(msg); }
 function toastError(msg){ toast(msg); }
 function getProgrammeTasksForProject(projectId){ return programmeTasksForProject(projectId); }
