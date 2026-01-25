@@ -2868,6 +2868,31 @@ if(_themeBtn) _themeBtn.addEventListener("click", ()=>{
   applyTheme();
 });
 
+// Header Sync button (global)
+const _syncBtn = document.getElementById("syncBtn");
+if(_syncBtn){
+  const refreshSyncBtnUI = ()=>{
+    const hasCfg = !!(settings.sync && String(settings.sync.url||"").trim() && String(settings.sync.key||"").trim());
+    _syncBtn.textContent = hasCfg ? "Sync" : "Sync setup";
+    _syncBtn.title = hasCfg ? ("Sync now • Last: " + formatLastSync()) : "Set Apps Script URL + Company key in Settings";
+    _syncBtn.classList.toggle("danger", !hasCfg);
+    _syncBtn.disabled = !hasCfg;
+  };
+  refreshSyncBtnUI();
+  // refresh UI when coming back from settings or after sync
+  window.addEventListener("focus", ()=>{ try{ refreshSyncBtnUI(); }catch(e){} });
+  _syncBtn.addEventListener("click", async ()=>{
+    try{
+      _syncBtn.disabled = true;
+      _syncBtn.textContent = "Syncing…";
+      await syncNowAll();
+    }finally{
+      try{ refreshSyncBtnUI(); }catch(e){}
+    }
+  });
+}
+
+
 function doExportAll(){
   const blob = new Blob([JSON.stringify({ state, settings, exportedAt: new Date().toISOString() }, null, 2)], {type:"application/json"});
   const a = document.createElement("a");
