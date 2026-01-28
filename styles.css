@@ -9,6 +9,8 @@
   --ok:#4cd964;
   --warn:#ffcc00;
   --shadow: 0 8px 22px rgba(0,0,0,.35);
+  --toast-bg: rgba(15,22,32,0.92);
+  --toast-text: rgba(255,255,255,0.95);
   --radius:14px;
   --pad:14px;
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
@@ -22,6 +24,8 @@
   --accent:#0066cc;
   --danger:#d12b2b;
   --shadow: 0 10px 26px rgba(12,20,33,.12);
+  --toast-bg: rgba(255,255,255,0.92);
+  --toast-text: rgba(17,23,34,0.96);
 }
 *{box-sizing:border-box}
 html,body{height:100%}
@@ -841,3 +845,26 @@ body{ background: var(--bg) !important; color: var(--text) !important; }
   box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
 }
 .dropdownItem:active{ transform: translateY(1px); }
+
+
+/* Theme fix: ensure modals follow light/dark theme */
+#modalBack .modal, #modal{
+  background: var(--card) !important;
+  color: var(--text) !important;
+}
+#modal label, #modal h1, #modal h2, #modal h3, #modal h4, #modal p, #modal div, #modal span{
+  color: inherit;
+}
+#modal .sub, #modal .smallmuted, #modal th{
+  color: var(--muted) !important;
+}
+
+/* Theme hardening: force text colors to follow vars */
+#app, #modal { color: var(--text); }
+#app :where(p, span, div, label, li, td, th, small, strong, b, em, i, h1, h2, h3, h4, h5, h6){
+  color: inherit;
+}
+#app :where(.sub, .smallmuted, .muted){ color: var(--muted) !important; }
+#app :where(a){ color: var(--link); }
+#app :where(input, select, textarea){ color: var(--text); }
+#app :where(input::placeholder, textarea::placeholder){ color: var(--muted); }
