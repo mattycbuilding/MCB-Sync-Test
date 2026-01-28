@@ -6047,11 +6047,12 @@ async function syncNowAll(){
     const pushed = await _syncRequest("push");
     const pulled = await _syncRequest("pull");
     const data = pulled.data || pulled.payload || pulled;
+    const workersOnServer = (data && data.Settings && Array.isArray(data.Settings.workers)) ? data.Settings.workers.length : null;
     _applyPulledData(data);
 
     setLastSync(pulled.serverTime || data.serverTime || new Date().toISOString());
     if(status) status.textContent = "Last synced: " + formatLastSync();
-    toast("Synced.");
+    toast("Synced" + (workersOnServer!==null ? (" • Workers: " + workersOnServer) : "") + ".");
     render();
   }catch(err){
     console.error(err);
@@ -6074,12 +6075,13 @@ async function downloadOnlyAll(){
 
     const pulled = await _syncRequest("pull");
     const data = pulled.data || pulled.payload || pulled;
+    const workersOnServer = (data && data.Settings && Array.isArray(data.Settings.workers)) ? data.Settings.workers.length : null;
     const changed = _applyPulledData(data);
 
     setLastSync(pulled.serverTime || data.serverTime || new Date().toISOString());
     if(status) status.textContent = "Last synced: " + formatLastSync();
-    if(changed) { toast("Downloaded updates."); render(); }
-    else toast("No changes.");
+    if(changed) { toast("Downloaded updates" + (workersOnServer!==null ? (" • Workers: " + workersOnServer) : "") + "."); render(); }
+    else toast("No changes" + (workersOnServer!==null ? (" • Workers: " + workersOnServer) : "") + ".");
   }catch(err){
     console.error(err);
     alert("Download failed: " + (err && err.message ? err.message : err));
