@@ -1,9 +1,10 @@
-const CACHE="mcb-cache-v15-20260123102300";
+const CACHE="mcb-cache-v17-20260129201000";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./sync-config.js",
   "./manifest.webmanifest",
   "./logo.png",
   "./icon-192.png",

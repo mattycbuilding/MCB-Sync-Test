@@ -1,6 +1,12 @@
 
 
-const BUILD_ID = "mcb-build-20260124-1135";
+const BUILD_ID = "mcb-build-20260129-2010";
+
+// === HARDWIRED SYNC CONFIG (loaded from sync-config.js) ===
+const __SYNC_CFG = (typeof window !== "undefined" && window.SYNC_CONFIG) ? window.SYNC_CONFIG : {};
+const HARD_SYNC_URL = String(__SYNC_CFG.APPS_SCRIPT_URL || "").trim();
+const HARD_COMPANY_KEY = String(__SYNC_CFG.COMPANY_KEY || "").trim();
+
 
 try{
   const prev = localStorage.getItem("mcb_build_id") || "";
@@ -1333,10 +1339,23 @@ function saveState(s){
 }
 function loadSettings(){
   const local = loadSettingsFromLocalStorage();
-  return { ...defaultSettings(), ...(local || {}) };
+  const next = { ...defaultSettings(), ...(local || {}) };
+
+  // Hardwire sync config (do not let Settings overwrite these).
+  if(!next.sync) next.sync = {};
+  next.sync.url = HARD_SYNC_URL;
+  next.sync.key = HARD_COMPANY_KEY;
+
+  return next;
 }
 function saveSettings(s){
   const next = { ...defaultSettings(), ...(s||{}) };
+
+  // Hardwire sync config (do not let Settings overwrite these).
+  if(!next.sync) next.sync = {};
+  next.sync.url = HARD_SYNC_URL;
+  next.sync.key = HARD_COMPANY_KEY;
+
   saveSettingsToLocalStorage(next);
   __pendingSettings = next;
   schedulePersist();
@@ -1567,6 +1586,17 @@ function addActivity(entry){
   try{
     state.activityLog = aliveArr(state.activityLog);
     const e = { id: uid(), at: nowISO(), ...entry };
+
+    // Best-effort attribution to the currently selected worker (if any)
+    try{
+      const wid = (settings && settings.workerMode && settings.workerMode.currentWorkerId) ? String(settings.workerMode.currentWorkerId) : "";
+      if(!e.workerId && wid) e.workerId = wid;
+      if(!e.workerName && (e.workerId || wid)){
+        const w = workerById(e.workerId || wid);
+        if(w && w.name) e.workerName = w.name;
+      }
+    }catch(_){}
+
     state.activityLog.unshift(e);
     if(state.activityLog.length > 500) state.activityLog = state.activityLog.slice(0, 500);
   }catch(err){}
@@ -5435,6 +5465,7 @@ function renderReports(app){
           <button class="btn primary" id="runReport" type="button">Run Job Report</button>
         </div>
       </div>
+
       <div class="grid two">
         <div>
           <label>Project</label>
@@ -5445,6 +5476,7 @@ ${projects.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join
         </div>
         <div></div>
       </div>
+
       <div class="grid two">
         <div>
           <label>Date from</label>
@@ -5455,14 +5487,70 @@ ${projects.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join
           <input id="r_to" class="input" type="date" value="${new Date().toISOString().slice(0,10)}" />
         </div>
       </div>
-      <div class="sub">Reports open in a printable preview. Use your browser share/print to save as PDF.</div>
+
+      <div class="row" style="gap:10px; align-items:center; margin-top:10px">
+        <label class="row" style="gap:8px; align-items:center">
+          <input id="r_alltime" type="checkbox" />
+          <span><strong>All time</strong></span>
+        </label>
+        <span class="sub">Ignore the date range and include everything for that project.</span>
+      </div>
+
+      <hr/>
+      <div style="font-weight:800; margin-bottom:8px">Include in Job Report</div>
+      <div class="grid two" style="gap:10px">
+        <label class="row" style="gap:8px; align-items:center"><input id="r_inc_summary" type="checkbox" checked/> <span>Project summary</span></label>
+        <label class="row" style="gap:8px; align-items:center"><input id="r_inc_diary" type="checkbox" checked/> <span>Diary</span></label>
+        <label class="row" style="gap:8px; align-items:center"><input id="r_inc_tasks" type="checkbox" checked/> <span>Tasks (open & completed)</span></label>
+        <label class="row" style="gap:8px; align-items:center"><input id="r_inc_variations" type="checkbox" checked/> <span>Variations</span></label>
+        <label class="row" style="gap:8px; align-items:center"><input id="r_inc_deliveries" type="checkbox" checked/> <span>Deliveries</span></label>
+        <label class="row" style="gap:8px; align-items:center"><input id="r_inc_inspections" type="checkbox" checked/> <span>Inspections</span></label>
+        <label class="row" style="gap:8px; align-items:center"><input id="r_inc_leads" type="checkbox" checked/> <span>Leads</span></label>
+        <label class="row" style="gap:8px; align-items:center"><input id="r_inc_programme" type="checkbox" checked/> <span>Programme</span></label>
+        <label class="row" style="gap:8px; align-items:center"><input id="r_inc_equipment" type="checkbox" checked/> <span>Equipment (assigned/logs)</span></label>
+        <label class="row" style="gap:8px; align-items:center"><input id="r_inc_fleet" type="checkbox" checked/> <span>Fleet (assigned/logs)</span></label>
+        <label class="row" style="gap:8px; align-items:center"><input id="r_inc_activity" type="checkbox" checked/> <span>Activity log</span></label>
+        <div></div>
+      </div>
+
+      <div class="sub" style="margin-top:10px">Reports open in a printable preview. Use your browser share/print to save as PDF.</div>
     </div>
   `;
+
+  const syncRangeUI = ()=>{
+    const all = $("#r_alltime").checked;
+    $("#r_from").disabled = all;
+    $("#r_to").disabled = all;
+    $("#r_from").style.opacity = all ? "0.55" : "1";
+    $("#r_to").style.opacity = all ? "0.55" : "1";
+  };
+  $("#r_alltime").onchange = syncRangeUI;
+  syncRangeUI();
+
   $("#runReport").onclick = ()=>{
     const pid = $("#r_project").value;
     if(pid==="__ALL__"){ alert("Select a specific project for Job Report."); return; }
-    runReportUI(pid, $("#r_from").value, $("#r_to").value);
+
+    const opts = {
+      allTime: $("#r_alltime").checked,
+      sections: {
+        summary: $("#r_inc_summary").checked,
+        diary: $("#r_inc_diary").checked,
+        tasks: $("#r_inc_tasks").checked,
+        variations: $("#r_inc_variations").checked,
+        deliveries: $("#r_inc_deliveries").checked,
+        inspections: $("#r_inc_inspections").checked,
+        leads: $("#r_inc_leads").checked,
+        programme: $("#r_inc_programme").checked,
+        equipment: $("#r_inc_equipment").checked,
+        fleet: $("#r_inc_fleet").checked,
+        activity: $("#r_inc_activity").checked
+      }
+    };
+
+    runReportUI(pid, opts.allTime ? null : $("#r_from").value, opts.allTime ? null : $("#r_to").value, opts);
   };
+
   $("#hnryExport").onclick = ()=>{
     const pid = $("#r_project").value;
     runHnryExportUI(pid, $("#r_from").value, $("#r_to").value);
@@ -5481,20 +5569,77 @@ ${projects.map(p=>`<option value="${p.id}">${escapeHtml(p.name)}</option>`).join
   }
 }
 
-function runReportUI(projectId, from=null, to=null){
-  const isAll = projectId === "__ALL__";
-  const p = isAll ? null : projectById(projectId);
-  if(!isAll && !p) return;
-  const rangeFrom = from || new Date(Date.now()-7*86400000).toISOString().slice(0,10);
-  const rangeTo = to || new Date().toISOString().slice(0,10);
 
-  const tasks = alive(state.tasks).filter(t=>t.projectId===projectId && isAlive(t));
-  const diary = alive(state.diary).filter(d=>d.projectId===projectId && isAlive(d)).filter(d=>d.date>=rangeFrom && d.date<=rangeTo).sort((a,b)=>(a.date||"").localeCompare(b.date||""));
-  const vars = alive(state.variations).filter(v=>v.projectId===projectId && isAlive(v)).filter(v=> (v.date||"")>=rangeFrom && (v.date||"")<=rangeTo);
-  const delivs = alive(state.deliveries).filter(d=>d.projectId===projectId && isAlive(d)).filter(d=> (d.date||"")>=rangeFrom && (d.date||"")<=rangeTo);
-  const insps = alive(state.inspections).filter(i=>i.projectId===projectId && isAlive(i)).filter(i=> (i.date||"")>=rangeFrom && (i.date||"")<=rangeTo);
+function runReportUI(projectId, from=null, to=null, opts=null){
+  const p = projectById(projectId);
+  if(!p) return;
 
-  const html = `
+  const sections = (opts && opts.sections) ? opts.sections : {
+    summary:true, diary:true, tasks:true, variations:true, deliveries:true, inspections:true, leads:true, programme:true, equipment:true, fleet:true, activity:true
+  };
+
+  const allTime = !!(opts && opts.allTime);
+  const rangeFrom = allTime ? "0000-01-01" : (from || new Date(Date.now()-7*86400000).toISOString().slice(0,10));
+  const rangeTo = allTime ? "9999-12-31" : (to || new Date().toISOString().slice(0,10));
+
+  const inRange = (d)=> {
+    const x = (d||"").slice(0,10);
+    if(!x) return false;
+    return x>=rangeFrom && x<=rangeTo;
+  };
+
+  // Pull data (only compute what we need)
+  const tasks = sections.tasks ? alive(state.tasks).filter(t=>t.projectId===projectId && isAlive(t)) : [];
+  const diary = sections.diary ? alive(state.diary).filter(d=>d.projectId===projectId && isAlive(d)).filter(d=> inRange(d.date)).sort((a,b)=>(a.date||"").localeCompare(b.date||"")) : [];
+  const vars = sections.variations ? alive(state.variations).filter(v=>v.projectId===projectId && isAlive(v)).filter(v=> inRange(v.date||"")) : [];
+  const delivs = sections.deliveries ? alive(state.deliveries).filter(d=>d.projectId===projectId && isAlive(d)).filter(d=> inRange(d.date||"")) : [];
+  const insps = sections.inspections ? alive(state.inspections).filter(i=>i.projectId===projectId && isAlive(i)).filter(i=> inRange(i.date||"")) : [];
+  const leads = sections.leads ? alive(state.leads).filter(l=>l.projectId===projectId && isAlive(l)).filter(l=> inRange(l.date||l.createdAt||"") || allTime) : [];
+
+  // Programme tasks/history
+  const programmeTasks = sections.programme ? aliveArr(state.programmeTasks).filter(t=>t.projectId===projectId && isAlive(t)) : [];
+  const programmeStats = sections.programme ? aliveArr(state.programmeHistoryStats).filter(s=>s.projectId===projectId && isAlive(s)).filter(s=> inRange(s.date||"") || allTime) : [];
+
+  // Equipment/Fleet logs (best-effort - schema varies)
+  const equipment = sections.equipment ? aliveArr(state.equipment).filter(e=> (e.projectId===projectId || e.assignedProjectId===projectId) && isAlive(e)) : [];
+  const equipmentLogs = sections.equipment ? aliveArr(state.equipmentLogs).filter(l=> l.projectId===projectId && isAlive(l)).filter(l=> inRange(l.date||l.createdAt||"") || allTime) : [];
+
+  const fleet = sections.fleet ? aliveArr(state.fleet).filter(v=> (v.projectId===projectId || v.assignedProjectId===projectId) && isAlive(v)) : [];
+  const fleetLogs = sections.fleet ? aliveArr(state.fleetLogs).filter(l=> l.projectId===projectId && isAlive(l)).filter(l=> inRange(l.date||l.createdAt||"") || allTime) : [];
+
+  const activity = sections.activity ? aliveArr(state.activityLog).filter(a=> (a.projectId===projectId || a.pid===projectId) && isAlive(a)).filter(a=> inRange(a.date||a.createdAt||"") || allTime) : [];
+
+// Activity helpers (details can be objects; include worker attribution if available)
+const activityWorker = (a)=>{
+  const n = a.workerName || a.byName || a.userName || a.enteredByName || "";
+  if(n) return n;
+  const wid = a.workerId || a.byId || a.userId || a.enteredById || "";
+  const w = wid ? workerById(wid) : null;
+  return (w && w.name) ? w.name : (a.by || "");
+};
+const activityDetailsText = (a)=>{
+  const cand = a.details ?? a.detail ?? a.note ?? a.summary ?? a.meta ?? a.data ?? a.changes ?? a.payload ?? "";
+  if(cand && typeof cand === "object"){
+    try{ return JSON.stringify(cand); }catch(_){ return String(cand); }
+  }
+  if(String(cand||"").trim()) return String(cand);
+
+  // Fallback: stringify remaining fields (excluding common headers)
+  try{
+    const skip = new Set(["id","at","createdAt","date","projectId","pid","action","type","workerId","workerName","by","byId","byName","userId","userName","enteredById","enteredByName"]);
+    const o = {};
+    Object.keys(a||{}).forEach(k=>{ if(!skip.has(k)) o[k]=a[k]; });
+    const s = JSON.stringify(o);
+    return s && s !== "{}" ? s : "";
+  }catch(_){ return ""; }
+};
+
+  // --- Build sections HTML ---
+
+  const blocks = [];
+
+  // Header / cover
+  blocks.push(`
     <div class="card printOnly" style="padding:18px">
       <div style="display:flex; gap:14px; align-items:center">
         <img src="./logo.png" alt="logo" style="height:44px; width:auto"/>
@@ -5504,7 +5649,10 @@ function runReportUI(projectId, from=null, to=null){
         </div>
       </div>
     </div>
+  `);
 
+  // Report top card
+  blocks.push(`
     <div class="card">
       <div class="row space">
         <h2>Job Report</h2>
@@ -5513,78 +5661,256 @@ function runReportUI(projectId, from=null, to=null){
           <button class="btn primary" id="printBtn" type="button">Print / Save PDF</button>
         </div>
       </div>
-      <div class="sub">${escapeHtml(p.name)} • ${escapeHtml(p.address||"")}<br/>Period: ${dateFmt(rangeFrom)} → ${dateFmt(rangeTo)}</div>
-      <hr/>
-      <h2>Diary</h2>
-      ${diary.length ? diary.map(d=>`
-        <div class="item">
-          <div class="row space">
-            <div><strong>${dateFmt(d.date)}</strong> ${d.billable?`<span class="badge ok">Billable</span>`:`<span class="badge">Non‑billable</span>`} ${d.hours?`<span class="badge">⏱ ${escapeHtml(String(d.hours))}h</span>`:""}</div>
-            <div class="smallmuted">${escapeHtml(d.category||"")}</div>
-          </div>
-          <div class="meta">${escapeHtml(d.summary||"")}</div>
-        </div>
-      `).join("") : `<div class="sub">No diary entries in range.</div>`}
+      <div class="sub">${escapeHtml(p.name)} • ${escapeHtml(p.address||"")}<br/>Period: ${allTime ? "All time" : `${dateFmt(rangeFrom)} → ${dateFmt(rangeTo)}`}</div>
+    </div>
+  `);
 
-      <hr/>
-      <h2>Open tasks</h2>
-      ${tasks.filter(t=>t.status!=="Done").length ? `
-        <table>
-          <thead><tr><th>Task</th><th>Status</th><th>Due</th><th>Assigned</th></tr></thead>
-          <tbody>
-            ${tasks.filter(t=>t.status!=="Done").map(t=>{
-              const s = t.assignedSubbieId ? subbieById(t.assignedSubbieId) : null;
-              return `<tr><td>${escapeHtml(t.title)}</td><td>${escapeHtml(t.status||"")}</td><td>${t.dueDate?escapeHtml(dateFmt(t.dueDate)):""}</td><td>${s?escapeHtml(s.name):""}</td></tr>`;
-            }).join("")}
-          </tbody>
-        </table>` : `<div class="sub">No open tasks.</div>`}
+  if(sections.summary){
+    const rows = [];
+    const add = (label, val)=>{ if(val!==undefined && val!==null && String(val).trim()!=="") rows.push(`<tr><th style="text-align:left; width:170px">${escapeHtml(label)}</th><td>${escapeHtml(String(val))}</td></tr>`); };
+    add("Project", p.name);
+    add("Address", p.address);
+    add("Status", p.status);
+    add("Client", p.clientName || p.client);
+    add("Client phone", p.clientPhone || p.phone);
+    add("Client email", p.clientEmail || p.email);
+    add("Start date", p.startDate ? dateFmt(p.startDate) : "");
+    add("Due date", p.dueDate ? dateFmt(p.dueDate) : "");
+    add("Notes", p.notes);
+    blocks.push(`
+      <div class="card">
+        <h2>Project summary</h2>
+        ${rows.length ? `<table><tbody>${rows.join("")}</tbody></table>` : `<div class="sub">No project details saved.</div>`}
+      </div>
+    `);
+  }
 
-      <hr/>
-      <h2>Variations</h2>
-      ${vars.length ? `
-        <table>
-          <thead><tr><th>Title</th><th>Status</th><th>Date</th><th>Amount</th></tr></thead>
-          <tbody>
-            ${vars.map(v=>`<tr><td>${escapeHtml(v.title)}</td><td>${escapeHtml(v.status||"")}</td><td>${v.date?escapeHtml(dateFmt(v.date)):""}</td><td>${v.amount?escapeHtml(money(v.amount)):""}</td></tr>`).join("")}
-          </tbody>
-        </table>` : `<div class="sub">No variations in range.</div>`}
+  if(sections.diary){
+    blocks.push(`
+      <div class="card">
+        <h2>Diary</h2>
+        ${diary.length ? diary.map(d=>{
+          const who = d.enteredBy || d.workerName || d.createdBy || d.user || "";
+          const whoBadge = who ? `<span class="badge">👤 ${escapeHtml(String(who))}</span>` : "";
+          return `
+            <div class="item">
+              <div class="row space">
+                <div>
+                  <strong>${dateFmt(d.date)}</strong>
+                  ${d.billable?`<span class="badge ok">Billable</span>`:`<span class="badge">Non‑billable</span>`}
+                  ${d.hours?`<span class="badge">⏱ ${escapeHtml(String(d.hours))}h</span>`:""}
+                  ${whoBadge}
+                </div>
+                <div class="smallmuted">${escapeHtml(d.category||"")}</div>
+              </div>
+              <div class="meta">${escapeHtml(d.summary||"")}</div>
+            </div>
+          `;
+        }).join("") : `<div class="sub">No diary entries${allTime ? "." : " in range."}</div>`}
+      </div>
+    `);
+  }
 
-      <hr/>
-      <h2>Deliveries</h2>
-      ${delivs.length ? `
-        <table>
-          <thead><tr><th>Supplier</th><th>Date</th><th>Status</th><th>Items</th></tr></thead>
-          <tbody>
-            ${delivs.map(d=>`<tr><td>${escapeHtml(d.supplier||"")}</td><td>${d.date?escapeHtml(dateFmt(d.date)):""}</td><td>${escapeHtml(d.status||"")}</td><td>${escapeHtml((d.items||"").slice(0,120))}</td></tr>`).join("")}
-          </tbody>
-        </table>` : `<div class="sub">No deliveries in range.</div>`}
+  if(sections.tasks){
+    const openTasks = tasks.filter(t=> (t.status||"")!=="Done");
+    const doneTasks = tasks.filter(t=> (t.status||"")==="Done");
+    const renderTaskTable = (arr)=> arr.length ? `
+      <table>
+        <thead><tr><th>Task</th><th>Status</th><th>Due</th><th>Assigned</th></tr></thead>
+        <tbody>
+          ${arr.map(t=>{
+            const s = t.assignedSubbieId ? subbieById(t.assignedSubbieId) : null;
+            return `<tr><td>${escapeHtml(t.title||"")}</td><td>${escapeHtml(t.status||"")}</td><td>${t.dueDate?escapeHtml(dateFmt(t.dueDate)):""}</td><td>${s?escapeHtml(s.name):escapeHtml(t.assignedTo||"")}</td></tr>`;
+          }).join("")}
+        </tbody>
+      </table>` : `<div class="sub">None.</div>`;
+    blocks.push(`
+      <div class="card">
+        <h2>Tasks</h2>
+        <div class="sub">Open</div>
+        ${renderTaskTable(openTasks)}
+        <hr/>
+        <div class="sub">Completed</div>
+        ${renderTaskTable(doneTasks)}
+      </div>
+    `);
+  }
 
-      <hr/>
-      <h2>Inspections</h2>
-      ${insps.length ? `
-        <table>
-          <thead><tr><th>Type</th><th>Date</th><th>Result</th><th>Notes</th></tr></thead>
-          <tbody>
-            ${insps.map(i=>`<tr><td>${escapeHtml(i.type||"")}</td><td>${i.date?escapeHtml(dateFmt(i.date)):""}</td><td>${escapeHtml(i.result||"")}</td><td>${escapeHtml((i.notes||"").slice(0,120))}</td></tr>`).join("")}
-          </tbody>
-        </table>` : `<div class="sub">No inspections in range.</div>`}
+  if(sections.variations){
+    blocks.push(`
+      <div class="card">
+        <h2>Variations</h2>
+        ${vars.length ? `
+          <table>
+            <thead><tr><th>Title</th><th>Status</th><th>Date</th><th>Amount</th></tr></thead>
+            <tbody>
+              ${vars.map(v=>`<tr><td>${escapeHtml(v.title||"")}</td><td>${escapeHtml(v.status||"")}</td><td>${v.date?escapeHtml(dateFmt(v.date)):""}</td><td>${v.amount?escapeHtml(money(v.amount)):""}</td></tr>`).join("")}
+            </tbody>
+          </table>` : `<div class="sub">No variations${allTime ? "." : " in range."}</div>`}
+      </div>
+    `);
+  }
 
-      <hr/>
+  if(sections.deliveries){
+    blocks.push(`
+      <div class="card">
+        <h2>Deliveries</h2>
+        ${delivs.length ? `
+          <table>
+            <thead><tr><th>Supplier</th><th>Date</th><th>Status</th><th>Items</th></tr></thead>
+            <tbody>
+              ${delivs.map(d=>`<tr><td>${escapeHtml(d.supplier||"")}</td><td>${d.date?escapeHtml(dateFmt(d.date)):""}</td><td>${escapeHtml(d.status||"")}</td><td>${escapeHtml((d.items||"").slice(0,180))}</td></tr>`).join("")}
+            </tbody>
+          </table>` : `<div class="sub">No deliveries${allTime ? "." : " in range."}</div>`}
+      </div>
+    `);
+  }
+
+  if(sections.inspections){
+    blocks.push(`
+      <div class="card">
+        <h2>Inspections</h2>
+        ${insps.length ? `
+          <table>
+            <thead><tr><th>Type</th><th>Date</th><th>Result</th><th>Notes</th></tr></thead>
+            <tbody>
+              ${insps.map(i=>`<tr><td>${escapeHtml(i.type||"")}</td><td>${i.date?escapeHtml(dateFmt(i.date)):""}</td><td>${escapeHtml(i.result||"")}</td><td>${escapeHtml((i.notes||"").slice(0,180))}</td></tr>`).join("")}
+            </tbody>
+          </table>` : `<div class="sub">No inspections${allTime ? "." : " in range."}</div>`}
+      </div>
+    `);
+  }
+
+  if(sections.leads){
+    blocks.push(`
+      <div class="card">
+        <h2>Leads</h2>
+        ${leads.length ? `
+          <table>
+            <thead><tr><th>Date</th><th>Name</th><th>Stage</th><th>Notes</th></tr></thead>
+            <tbody>
+              ${leads.map(l=>`<tr><td>${escapeHtml(l.date?dateFmt(l.date):"")}</td><td>${escapeHtml(l.name||"")}</td><td>${escapeHtml(l.stage||l.status||"")}</td><td>${escapeHtml((l.notes||l.summary||"").slice(0,180))}</td></tr>`).join("")}
+            </tbody>
+          </table>` : `<div class="sub">No leads${allTime ? "." : " in range."}</div>`}
+      </div>
+    `);
+  }
+
+  if(sections.programme){
+    blocks.push(`
+      <div class="card">
+        <h2>Programme</h2>
+        ${programmeTasks.length ? `
+          <table>
+            <thead><tr><th>Task</th><th>Phase</th><th>Status</th><th>Start</th><th>Due</th></tr></thead>
+            <tbody>
+              ${programmeTasks.map(t=>`<tr><td>${escapeHtml(t.name||t.title||"")}</td><td>${escapeHtml(t.phase||"")}</td><td>${escapeHtml(t.status||"")}</td><td>${t.startDate?escapeHtml(dateFmt(t.startDate)):""}</td><td>${t.dueDate?escapeHtml(dateFmt(t.dueDate)):""}</td></tr>`).join("")}
+            </tbody>
+          </table>` : `<div class="sub">No programme tasks saved.</div>`}
+        ${programmeStats.length ? `
+          <hr/>
+          <div class="sub">History / snapshots</div>
+          <table>
+            <thead><tr><th>Date</th><th>Summary</th></tr></thead>
+            <tbody>
+              ${programmeStats.map(s=>`<tr><td>${escapeHtml(s.date?dateFmt(s.date):"")}</td><td>${escapeHtml((s.summary||JSON.stringify(s)).slice(0,220))}</td></tr>`).join("")}
+            </tbody>
+          </table>` : ``}
+      </div>
+    `);
+  }
+
+  if(sections.equipment){
+    blocks.push(`
+      <div class="card">
+        <h2>Equipment</h2>
+        ${equipment.length ? `
+          <table>
+            <thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Notes</th></tr></thead>
+            <tbody>
+              ${equipment.map(e=>`<tr><td>${escapeHtml(e.name||"")}</td><td>${escapeHtml(e.type||"")}</td><td>${escapeHtml(e.status||"")}</td><td>${escapeHtml((e.notes||"").slice(0,160))}</td></tr>`).join("")}
+            </tbody>
+          </table>` : `<div class="sub">No equipment linked to this project.</div>`}
+        ${equipmentLogs.length ? `
+          <hr/>
+          <div class="sub">Logs</div>
+          <table>
+            <thead><tr><th>Date</th><th>Item</th><th>Entry</th></tr></thead>
+            <tbody>
+              ${equipmentLogs.map(l=>`<tr><td>${escapeHtml(l.date?dateFmt(l.date):"")}</td><td>${escapeHtml(l.item||l.equipmentName||"")}</td><td>${escapeHtml((l.notes||l.entry||l.summary||"").slice(0,200))}</td></tr>`).join("")}
+            </tbody>
+          </table>` : ``}
+      </div>
+    `);
+  }
+
+  if(sections.fleet){
+    blocks.push(`
+      <div class="card">
+        <h2>Fleet</h2>
+        ${fleet.length ? `
+          <table>
+            <thead><tr><th>Vehicle</th><th>Type</th><th>Status</th><th>Notes</th></tr></thead>
+            <tbody>
+              ${fleet.map(v=>`<tr><td>${escapeHtml(v.name||v.vehicle||"")}</td><td>${escapeHtml(v.type||"")}</td><td>${escapeHtml(v.status||"")}</td><td>${escapeHtml((v.notes||"").slice(0,160))}</td></tr>`).join("")}
+            </tbody>
+          </table>` : `<div class="sub">No fleet linked to this project.</div>`}
+        ${fleetLogs.length ? `
+          <hr/>
+          <div class="sub">Logs</div>
+          <table>
+            <thead><tr><th>Date</th><th>Vehicle</th><th>Entry</th></tr></thead>
+            <tbody>
+              ${fleetLogs.map(l=>`<tr><td>${escapeHtml(l.date?dateFmt(l.date):"")}</td><td>${escapeHtml(l.vehicle||l.name||"")}</td><td>${escapeHtml((l.notes||l.entry||l.summary||"").slice(0,200))}</td></tr>`).join("")}
+            </tbody>
+          </table>` : ``}
+      </div>
+    `);
+  }
+
+  if(sections.activity){
+    blocks.push(`
+      <div class="card">
+        <h2>Activity log</h2>
+        ${activity.length ? `
+          <table>
+            <thead><tr><th>Date</th><th>Worker</th><th>Action</th><th>Details</th></tr></thead>
+            <tbody>
+              ${activity.sort((a,b)=>(a.date||a.createdAt||a.at||"").localeCompare(b.date||b.createdAt||b.at||"")).map(a=>{
+                const d = a.date || a.createdAt || a.at || "";
+                const who = activityWorker(a) || "—";
+                const det = activityDetailsText(a);
+                return `<tr>
+                  <td>${escapeHtml(d ? dateFmt(d) : "")}</td>
+                  <td>${escapeHtml(who)}</td>
+                  <td>${escapeHtml(a.action||a.type||"")}</td>
+                  <td>${escapeHtml((det||"").slice(0,900))}</td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table>` : `<div class="sub">No activity logged${allTime ? "." : " in range."}</div>`}
+      </div>
+    `);
+  }
+
+  // Footer
+  blocks.push(`
+    <div class="card">
       <div class="smallmuted">Generated ${new Date().toLocaleString("en-NZ")}</div>
     </div>
-  `;
+  `);
 
-  // open in same app as modal with print
+  const html = blocks.join("\n");
+
   showModal(html);
   $("#copyLink").onclick = async ()=>{
     try{
-      await navigator.clipboard.writeText(`Job Report: ${p.name} (${rangeFrom} to ${rangeTo})`);
+      await navigator.clipboard.writeText(`Job Report: ${p.name} (${allTime ? "All time" : (rangeFrom + " to " + rangeTo)})`);
       alert("Copied.");
     }catch(e){ alert("Copy failed."); }
   };
   $("#printBtn").onclick = ()=> printModalOnly("Job Report");
 }
-
 
 function runHnryExportUI(projectId, from=null, to=null){
   const rangeFrom = from || new Date(Date.now()-7*86400000).toISOString().slice(0,10);
@@ -5719,10 +6045,6 @@ function renderSettings(app){
       <div class="card">
         <h2>Google Sheets sync</h2>
         <div class="sub">Sync everything (projects, tasks, diary, variations, deliveries, inspections, H&amp;S, equipment, leads, and worker profiles).</div>
-        <label style="margin-top:10px">Apps Script URL</label>
-        <input class="input" id="sync_url" value="${escapeHtml((settings.sync && settings.sync.url) || "")}" placeholder="https://script.google.com/macros/s/…/exec" />
-        <label>Company key</label>
-        <input class="input" id="sync_key" value="${escapeHtml((settings.sync && settings.sync.key) || "")}" placeholder="Your company key" />
         <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:10px">
           <button class="btn primary" id="settingsSyncBtn" type="button">Sync now</button>
           <button class="btn" id="settingsDownloadOnlyBtn" type="button">Download only</button>
@@ -5812,14 +6134,8 @@ function renderSettings(app){
   // Settings page: bind Export/Import buttons
   try{ bindImportExportButtons(); }catch(e){}
   try{ bindWorkerSettingsUI(); }catch(e){}
-
   // Google Sheets Sync (Settings)
   try{
-    const u = document.getElementById("sync_url");
-    const k = document.getElementById("sync_key");
-    if(!settings.sync) settings.sync = { url:"", key:"" };
-    if(u) u.onchange = ()=>{ settings.sync.url = u.value.trim(); saveSettings(settings); };
-    if(k) k.onchange = ()=>{ settings.sync.key = k.value.trim(); saveSettings(settings); };
 
     const btn = document.getElementById("settingsSyncBtn");
     const dl = document.getElementById("settingsDownloadOnlyBtn");
@@ -7607,6 +7923,17 @@ function addActivity(entry){
   try{
     state.activityLog = aliveArr(state.activityLog);
     const e = { id: uid(), at: nowISO(), ...entry };
+
+    // Best-effort attribution to the currently selected worker (if any)
+    try{
+      const wid = (settings && settings.workerMode && settings.workerMode.currentWorkerId) ? String(settings.workerMode.currentWorkerId) : "";
+      if(!e.workerId && wid) e.workerId = wid;
+      if(!e.workerName && (e.workerId || wid)){
+        const w = workerById(e.workerId || wid);
+        if(w && w.name) e.workerName = w.name;
+      }
+    }catch(_){}
+
     state.activityLog.unshift(e);
     if(state.activityLog.length > 500) state.activityLog = state.activityLog.slice(0, 500);
   }catch(err){}
